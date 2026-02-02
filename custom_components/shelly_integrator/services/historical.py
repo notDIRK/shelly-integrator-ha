@@ -123,12 +123,16 @@ class HistoricalDataService:
 
         for csv_file in csv_files:
             try:
+                # Extract just filename - import_statistics prepends /config/
+                from pathlib import Path
+                filename = Path(csv_file).name
+                
                 # Service parameters must match import_statistics expected format
                 await self._hass.services.async_call(
                     "import_statistics",
                     "import_from_file",
                     {
-                        "filename": csv_file,
+                        "filename": filename,
                         "define_import_format": {
                             "delimiter": ",",
                             "decimal": "dot ('.')",
