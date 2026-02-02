@@ -1,34 +1,24 @@
-"""Sensor platform for Shelly Integrator.
-
-Based on official Home Assistant Shelly integration patterns.
-"""
+"""Sensor platform for Shelly Integrator."""
 from __future__ import annotations
 
 import logging
 import re
 from typing import Any
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import ShellyIntegratorCoordinator, SIGNAL_NEW_DEVICE
-from .entity_descriptions import (
+from .entities.base import ShellyBaseEntity
+from .entities.descriptions import (
     BLOCK_SENSORS,
     RPC_SENSORS,
     BlockSensorDescription,
     RpcSensorDescription,
-    get_model_name,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,47 +31,47 @@ async def async_setup_entry(
 ) -> None:
     """Set up Shelly Integrator sensors."""
     coordinator: ShellyIntegratorCoordinator = hass.data[DOMAIN][entry.entry_id]
-
-    # Track which sensor entities have been created (by unique_id)
     created_sensors: set[str] = set()
 
-    def _create_sensors(device_id: str) -> list[SensorEntity]:
-        """Create sensor entities for a device based on its status."""
+    def create_sensors(device_id: str) -> list[SensorEntity]:
+        """Create sensor entities for a device."""
         entities: list[SensorEntity] = []
         device_data = coordinator.devices.get(device_id, {})
         status = device_data.get("status", {})
-        
+
         if not status:
-            _LOGGER.debug("No status data for device %s", device_id)
             return entities
 
-        # Detect device generation based on status keys
         is_gen2 = any(
             re.match(r"switch:\d+|light:\d+|cover:\d+|input:\d+", key)
             for key in status.keys()
         )
 
         if is_gen2:
-            entities.extend(_create_rpc_sensors(device_id, status, created_sensors, coordinator))
+            entities.extend(_create_rpc_sensors(
+                device_id, status, created_sensors, coordinator
+            ))
         else:
-            entities.extend(_create_block_sensors(device_id, status, created_sensors, coordinator))
+            entities.extend(_create_block_sensors(
+                device_id, status, created_sensors, coordinator
+            ))
 
         if entities:
-            _LOGGER.info("Creating %d sensor entities for device %s", len(entities), device_id)
+            _LOGGER.info("Created %d sensors for %s", len(entities), device_id)
 
         return entities
 
     @callback
     def async_add_device(device_id: str) -> None:
-        """Add entities for a newly discovered device."""
-        entities = _create_sensors(device_id)
+        """Add entities for newly discovered device."""
+        entities = create_sensors(device_id)
         if entities:
             async_add_entities(entities)
 
     # Add existing devices
     entities: list[SensorEntity] = []
     for device_id in list(coordinator.devices.keys()):
-        entities.extend(_create_sensors(device_id))
+        entities.extend(create_sensors(device_id))
 
     if entities:
         async_add_entities(entities)
@@ -95,176 +85,86 @@ async def async_setup_entry(
 def _create_block_sensors(
     device_id: str,
     status: dict[str, Any],
-    created_sensors: set[str],
+    created: set[str],
     coordinator: ShellyIntegratorCoordinator,
 ) -> list[SensorEntity]:
-    """Create Gen1 Block sensors from status."""
+    """Create Gen1 Block sensors."""
     entities: list[SensorEntity] = []
 
-    # Map status keys to block/attribute format
-    # Gen1 status has: emeters[], relays[], meters[], gas_sensor{}, etc.
-    
-    # Emeters (Shelly EM, 3EM)
-    emeters = status.get("emeters", [])
-    for idx, emeter in enumerate(emeters):
-        for attr in ["power", "voltage", "current", "pf", "reactive"]:
-            if attr in emeter:
-                key = ("emeter", attr if attr != "pf" else "powerFactor")
-                if key in BLOCK_SENSORS:
-                    desc = BLOCK_SENSORS[key]
-                    unique_id = f"{device_id}_{desc.key}_{idx}"
-                    if unique_id not in created_sensors:
-                        created_sensors.add(unique_id)
-                        entities.append(BlockSensor(
-                            coordinator, device_id, desc, idx, "emeters", attr
-                        ))
-        # Energy
-        if "total" in emeter:
-            key = ("emeter", "energy")
-            if key in BLOCK_SENSORS:
+    # Emeters
+    for idx, emeter in enumerate(status.get("emeters", [])):
+        for attr, key in [
+            ("power", ("emeter", "power")),
+            ("voltage", ("emeter", "voltage")),
+            ("current", ("emeter", "current")),
+            ("pf", ("emeter", "powerFactor")),
+        ]:
+            if attr in emeter and key in BLOCK_SENSORS:
                 desc = BLOCK_SENSORS[key]
-                unique_id = f"{device_id}_{desc.key}_{idx}"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
+                uid = f"{device_id}_{desc.key}_{idx}"
+                if uid not in created:
+                    created.add(uid)
+                    entities.append(BlockSensor(
+                        coordinator, device_id, desc, idx, "emeters", attr
+                    ))
+
+        if "total" in emeter:
+            desc = BLOCK_SENSORS.get(("emeter", "energy"))
+            if desc:
+                uid = f"{device_id}_{desc.key}_{idx}"
+                if uid not in created:
+                    created.add(uid)
                     entities.append(BlockSensor(
                         coordinator, device_id, desc, idx, "emeters", "total"
                     ))
-        # Energy returned
-        if "total_returned" in emeter:
-            key = ("emeter", "energyReturned")
-            if key in BLOCK_SENSORS:
-                desc = BLOCK_SENSORS[key]
-                unique_id = f"{device_id}_{desc.key}_ret_{idx}"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
-                    entities.append(BlockSensor(
-                        coordinator, device_id, desc, idx, "emeters", "total_returned"
-                    ))
 
-    # Meters (Shelly 1PM, etc.)
-    meters = status.get("meters", [])
-    for idx, meter in enumerate(meters):
+    # Meters
+    for idx, meter in enumerate(status.get("meters", [])):
         if "power" in meter:
-            key = ("relay", "power")
-            if key in BLOCK_SENSORS:
-                desc = BLOCK_SENSORS[key]
-                unique_id = f"{device_id}_meter_power_{idx}"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
+            desc = BLOCK_SENSORS.get(("relay", "power"))
+            if desc:
+                uid = f"{device_id}_meter_power_{idx}"
+                if uid not in created:
+                    created.add(uid)
                     entities.append(BlockSensor(
                         coordinator, device_id, desc, idx, "meters", "power"
                     ))
-        if "total" in meter:
-            key = ("relay", "energy")
-            if key in BLOCK_SENSORS:
-                desc = BLOCK_SENSORS[key]
-                unique_id = f"{device_id}_meter_energy_{idx}"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
-                    entities.append(BlockSensor(
-                        coordinator, device_id, desc, idx, "meters", "total"
-                    ))
 
-    # Gas sensor (Shelly Gas)
-    gas_sensor = status.get("gas_sensor", {})
-    if gas_sensor:
-        # Sensor operation state
-        if "sensor_state" in gas_sensor:
-            key = ("sensor", "sensorOp")
-            if key in BLOCK_SENSORS:
-                desc = BLOCK_SENSORS[key]
-                unique_id = f"{device_id}_gas_sensor_state"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
-                    entities.append(BlockSensor(
-                        coordinator, device_id, desc, 0, "gas_sensor", "sensor_state"
-                    ))
-        # Alarm state
-        if "alarm_state" in gas_sensor:
-            key = ("sensor", "gas")
-            if key in BLOCK_SENSORS:
-                desc = BLOCK_SENSORS[key]
-                unique_id = f"{device_id}_gas_alarm_state"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
-                    entities.append(BlockSensor(
-                        coordinator, device_id, desc, 0, "gas_sensor", "alarm_state"
-                    ))
-        # Self test
-        if "self_test_state" in gas_sensor:
-            key = ("sensor", "selfTest")
-            if key in BLOCK_SENSORS:
-                desc = BLOCK_SENSORS[key]
-                unique_id = f"{device_id}_gas_self_test"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
-                    entities.append(BlockSensor(
-                        coordinator, device_id, desc, 0, "gas_sensor", "self_test_state"
-                    ))
+    # Gas sensor
+    gas = status.get("gas_sensor", {})
+    if gas and "sensor_state" in gas:
+        desc = BLOCK_SENSORS.get(("sensor", "sensorOp"))
+        if desc:
+            uid = f"{device_id}_gas_sensor_state"
+            if uid not in created:
+                created.add(uid)
+                entities.append(BlockSensor(
+                    coordinator, device_id, desc, 0, "gas_sensor", "sensor_state"
+                ))
 
-    # Gas concentration
-    concentration = status.get("concentration", {})
-    if concentration and concentration.get("is_valid"):
-        key = ("sensor", "concentration")
-        if key in BLOCK_SENSORS:
-            desc = BLOCK_SENSORS[key]
-            unique_id = f"{device_id}_gas_concentration"
-            if unique_id not in created_sensors:
-                created_sensors.add(unique_id)
+    # Concentration
+    conc = status.get("concentration", {})
+    if conc and conc.get("is_valid"):
+        desc = BLOCK_SENSORS.get(("sensor", "concentration"))
+        if desc:
+            uid = f"{device_id}_gas_concentration"
+            if uid not in created:
+                created.add(uid)
                 entities.append(BlockSensor(
                     coordinator, device_id, desc, 0, "concentration", "ppm"
                 ))
 
-    # Temperature (various devices)
+    # Temperature
     temp = status.get("tmp", {}) or status.get("temperature", {})
     if temp and "tC" in temp:
-        key = ("sensor", "temp")
-        if key in BLOCK_SENSORS:
-            desc = BLOCK_SENSORS[key]
-            unique_id = f"{device_id}_temperature"
-            if unique_id not in created_sensors:
-                created_sensors.add(unique_id)
+        desc = BLOCK_SENSORS.get(("sensor", "temp"))
+        if desc:
+            uid = f"{device_id}_temperature"
+            if uid not in created:
+                created.add(uid)
+                key = "tmp" if "tmp" in status else "temperature"
                 entities.append(BlockSensor(
-                    coordinator, device_id, desc, 0, "tmp" if "tmp" in status else "temperature", "tC"
-                ))
-
-    # Humidity (Shelly H&T)
-    hum = status.get("hum", {})
-    if hum and "value" in hum:
-        key = ("sensor", "humidity")
-        if key in BLOCK_SENSORS:
-            desc = BLOCK_SENSORS[key]
-            unique_id = f"{device_id}_humidity"
-            if unique_id not in created_sensors:
-                created_sensors.add(unique_id)
-                entities.append(BlockSensor(
-                    coordinator, device_id, desc, 0, "hum", "value"
-                ))
-
-    # Battery
-    bat = status.get("bat", {})
-    if bat and "value" in bat:
-        key = ("device", "battery")
-        if key in BLOCK_SENSORS:
-            desc = BLOCK_SENSORS[key]
-            unique_id = f"{device_id}_battery"
-            if unique_id not in created_sensors:
-                created_sensors.add(unique_id)
-                entities.append(BlockSensor(
-                    coordinator, device_id, desc, 0, "bat", "value"
-                ))
-
-    # Illuminance (Shelly Motion)
-    lux = status.get("lux", {})
-    if lux and "value" in lux:
-        key = ("sensor", "luminosity")
-        if key in BLOCK_SENSORS:
-            desc = BLOCK_SENSORS[key]
-            unique_id = f"{device_id}_illuminance"
-            if unique_id not in created_sensors:
-                created_sensors.add(unique_id)
-                entities.append(BlockSensor(
-                    coordinator, device_id, desc, 0, "lux", "value"
+                    coordinator, device_id, desc, 0, key, "tC"
                 ))
 
     return entities
@@ -273,120 +173,51 @@ def _create_block_sensors(
 def _create_rpc_sensors(
     device_id: str,
     status: dict[str, Any],
-    created_sensors: set[str],
+    created: set[str],
     coordinator: ShellyIntegratorCoordinator,
 ) -> list[SensorEntity]:
-    """Create Gen2/Gen3 RPC sensors from status."""
+    """Create Gen2/Gen3 RPC sensors."""
     entities: list[SensorEntity] = []
 
-    # Find all switch:N components
     for key in status:
         if match := re.match(r"(switch|light|cover):(\d+)", key):
             component = match.group(1)
             idx = int(match.group(2))
-            component_data = status[key]
+            data = status[key]
 
-            # Power
-            if "apower" in component_data:
-                desc = RPC_SENSORS.get("switch_power")
-                if desc:
-                    unique_id = f"{device_id}_{component}_{idx}_power"
-                    if unique_id not in created_sensors:
-                        created_sensors.add(unique_id)
-                        entities.append(RpcSensor(
-                            coordinator, device_id, desc, idx, key, "apower"
-                        ))
+            for attr, desc_key in [
+                ("apower", "switch_power"),
+                ("voltage", "switch_voltage"),
+                ("current", "switch_current"),
+            ]:
+                if attr in data:
+                    desc = RPC_SENSORS.get(desc_key)
+                    if desc:
+                        uid = f"{device_id}_{component}_{idx}_{attr}"
+                        if uid not in created:
+                            created.add(uid)
+                            entities.append(RpcSensor(
+                                coordinator, device_id, desc, idx, key, attr
+                            ))
 
-            # Voltage
-            if "voltage" in component_data:
-                desc = RPC_SENSORS.get("switch_voltage")
-                if desc:
-                    unique_id = f"{device_id}_{component}_{idx}_voltage"
-                    if unique_id not in created_sensors:
-                        created_sensors.add(unique_id)
-                        entities.append(RpcSensor(
-                            coordinator, device_id, desc, idx, key, "voltage"
-                        ))
-
-            # Current
-            if "current" in component_data:
-                desc = RPC_SENSORS.get("switch_current")
-                if desc:
-                    unique_id = f"{device_id}_{component}_{idx}_current"
-                    if unique_id not in created_sensors:
-                        created_sensors.add(unique_id)
-                        entities.append(RpcSensor(
-                            coordinator, device_id, desc, idx, key, "current"
-                        ))
-
-            # Energy
-            if "aenergy" in component_data:
-                desc = RPC_SENSORS.get("switch_energy")
-                if desc:
-                    unique_id = f"{device_id}_{component}_{idx}_energy"
-                    if unique_id not in created_sensors:
-                        created_sensors.add(unique_id)
-                        entities.append(RpcSensor(
-                            coordinator, device_id, desc, idx, key, "aenergy"
-                        ))
-
-            # Temperature
-            if "temperature" in component_data:
-                desc = RPC_SENSORS.get("switch_temperature")
-                if desc:
-                    unique_id = f"{device_id}_{component}_{idx}_temp"
-                    if unique_id not in created_sensors:
-                        created_sensors.add(unique_id)
-                        entities.append(RpcSensor(
-                            coordinator, device_id, desc, idx, key, "temperature"
-                        ))
-
-    # Temperature components (temperature:N)
+    # Temperature sensors
     for key in status:
         if match := re.match(r"temperature:(\d+)", key):
             idx = int(match.group(1))
             desc = RPC_SENSORS.get("temperature")
             if desc:
-                unique_id = f"{device_id}_temperature_{idx}"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
+                uid = f"{device_id}_temperature_{idx}"
+                if uid not in created:
+                    created.add(uid)
                     entities.append(RpcSensor(
                         coordinator, device_id, desc, idx, key, "tC"
-                    ))
-
-    # Humidity components (humidity:N)
-    for key in status:
-        if match := re.match(r"humidity:(\d+)", key):
-            idx = int(match.group(1))
-            desc = RPC_SENSORS.get("humidity")
-            if desc:
-                unique_id = f"{device_id}_humidity_{idx}"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
-                    entities.append(RpcSensor(
-                        coordinator, device_id, desc, idx, key, "rh"
-                    ))
-
-    # Illuminance (illuminance:N)
-    for key in status:
-        if match := re.match(r"illuminance:(\d+)", key):
-            idx = int(match.group(1))
-            desc = RPC_SENSORS.get("illuminance")
-            if desc:
-                unique_id = f"{device_id}_illuminance_{idx}"
-                if unique_id not in created_sensors:
-                    created_sensors.add(unique_id)
-                    entities.append(RpcSensor(
-                        coordinator, device_id, desc, idx, key, "lux"
                     ))
 
     return entities
 
 
-class BlockSensor(CoordinatorEntity[ShellyIntegratorCoordinator], SensorEntity):
-    """Shelly Gen1 Block sensor entity."""
-
-    _attr_has_entity_name = True
+class BlockSensor(ShellyBaseEntity, SensorEntity):
+    """Gen1 Block sensor."""
 
     def __init__(
         self,
@@ -398,20 +229,14 @@ class BlockSensor(CoordinatorEntity[ShellyIntegratorCoordinator], SensorEntity):
         attr_key: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._device_id = device_id
+        super().__init__(coordinator, device_id, channel)
         self._description = description
-        self._channel = channel
         self._status_key = status_key
         self._attr_key = attr_key
 
         self._attr_unique_id = f"{device_id}_{description.key}_{channel}"
-        
-        # Add channel suffix if multiple channels
         name = description.name or "Sensor"
-        if channel > 0:
-            name = f"{name} {channel + 1}"
-        self._attr_name = name
+        self._attr_name = name if channel == 0 else f"{name} {channel + 1}"
 
         if description.device_class:
             self._attr_device_class = description.device_class
@@ -427,44 +252,14 @@ class BlockSensor(CoordinatorEntity[ShellyIntegratorCoordinator], SensorEntity):
             self._attr_suggested_display_precision = description.suggested_display_precision
 
     @property
-    def device_info(self) -> DeviceInfo:
-        """Return device info."""
-        device_data = self.coordinator.devices.get(self._device_id, {})
-        device_code = device_data.get("device_code", "")
-        
-        name = device_data.get("name")
-        if not name:
-            status = device_data.get("status", {})
-            getinfo = status.get("getinfo", {}).get("fw_info", {})
-            name = getinfo.get("device")
-        if not name:
-            name = get_model_name(device_code) if device_code else f"Shelly {self._device_id[-6:]}"
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._device_id)},
-            name=name,
-            manufacturer="Shelly",
-            model=get_model_name(device_code) if device_code else "Unknown",
-        )
-
-    @property
-    def available(self) -> bool:
-        """Return if entity is available."""
-        device = self.coordinator.devices.get(self._device_id, {})
-        return device.get("online", False)
-
-    @property
     def native_value(self) -> float | int | str | None:
-        """Return the sensor value."""
-        device = self.coordinator.devices.get(self._device_id, {})
-        status = device.get("status", {})
-
-        # Navigate to the value
+        """Return sensor value."""
+        status = self.device_status
         container = status.get(self._status_key)
+
         if container is None:
             return None
 
-        # Handle arrays (emeters, meters, etc.)
         if isinstance(container, list):
             if self._channel >= len(container):
                 return None
@@ -472,17 +267,14 @@ class BlockSensor(CoordinatorEntity[ShellyIntegratorCoordinator], SensorEntity):
 
         value = container.get(self._attr_key) if isinstance(container, dict) else None
 
-        # Apply transformation if defined
         if value is not None and self._description.value_fn:
             value = self._description.value_fn(value)
 
         return value
 
 
-class RpcSensor(CoordinatorEntity[ShellyIntegratorCoordinator], SensorEntity):
-    """Shelly Gen2/Gen3 RPC sensor entity."""
-
-    _attr_has_entity_name = True
+class RpcSensor(ShellyBaseEntity, SensorEntity):
+    """Gen2/Gen3 RPC sensor."""
 
     def __init__(
         self,
@@ -494,20 +286,14 @@ class RpcSensor(CoordinatorEntity[ShellyIntegratorCoordinator], SensorEntity):
         attr_key: str,
     ) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._device_id = device_id
+        super().__init__(coordinator, device_id, channel)
         self._description = description
-        self._channel = channel
         self._component_key = component_key
         self._attr_key = attr_key
 
         self._attr_unique_id = f"{device_id}_{component_key}_{attr_key}"
-
-        # Add channel suffix if multiple channels
         name = description.name or "Sensor"
-        if channel > 0:
-            name = f"{name} {channel + 1}"
-        self._attr_name = name
+        self._attr_name = name if channel == 0 else f"{name} {channel + 1}"
 
         if description.device_class:
             self._attr_device_class = description.device_class
@@ -523,45 +309,14 @@ class RpcSensor(CoordinatorEntity[ShellyIntegratorCoordinator], SensorEntity):
             self._attr_suggested_display_precision = description.suggested_display_precision
 
     @property
-    def device_info(self) -> DeviceInfo:
-        """Return device info."""
-        device_data = self.coordinator.devices.get(self._device_id, {})
-        device_code = device_data.get("device_code", "")
-        status = device_data.get("status", {})
-        
-        name = device_data.get("name")
-        if not name:
-            sys_info = status.get("sys", {}).get("device", {})
-            name = sys_info.get("name")
-        if not name:
-            name = get_model_name(device_code) if device_code else f"Shelly {self._device_id[-6:]}"
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._device_id)},
-            name=name,
-            manufacturer="Shelly",
-            model=get_model_name(device_code) if device_code else "Unknown",
-        )
-
-    @property
-    def available(self) -> bool:
-        """Return if entity is available."""
-        device = self.coordinator.devices.get(self._device_id, {})
-        return device.get("online", False)
-
-    @property
     def native_value(self) -> float | int | str | None:
-        """Return the sensor value."""
-        device = self.coordinator.devices.get(self._device_id, {})
-        status = device.get("status", {})
-
-        component = status.get(self._component_key)
+        """Return sensor value."""
+        component = self.device_status.get(self._component_key)
         if component is None:
             return None
 
         value = component.get(self._attr_key)
 
-        # Apply transformation if defined
         if value is not None and self._description.value_fn:
             value = self._description.value_fn(value)
 

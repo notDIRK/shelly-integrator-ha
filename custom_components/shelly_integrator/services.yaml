@@ -1,0 +1,26 @@
+convert_historical_data:
+  name: Convert Historical Data
+  description: >-
+    Fetches Shelly EM historical energy data from a local gateway proxy and
+    converts it to CSV format compatible with the homeassistant-statistics
+    HACS integration for import into Home Assistant long-term statistics.
+  fields:
+    gateway_url:
+      name: Gateway URL
+      description: >-
+        Base URL of local gateway that proxies to Shelly devices
+        (e.g., https://myproxy.com/sensor). If not provided, uses the URL
+        configured in integration options.
+      required: false
+      example: "https://silver.oldtownsultanahmet.com/sensor"
+      selector:
+        text:
+    device_id:
+      name: Device ID
+      description: >-
+        Optional Shelly Cloud device ID to convert. If not provided,
+        converts data for all EM devices.
+      required: false
+      example: "80157669366571"
+      selector:
+        text:

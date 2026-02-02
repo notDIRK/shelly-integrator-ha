@@ -19,6 +19,7 @@ from .const import (
     API_GET_TOKEN,
     INTEGRATOR_TAG,
     CONF_INTEGRATOR_TOKEN,
+    CONF_LOCAL_GATEWAY_URL,
     SHELLY_CONSENT_URL,
     WEBHOOK_ID,
 )
@@ -131,16 +132,24 @@ class ShellyIntegratorOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Manage the options - show consent URL to add more devices."""
+        """Manage the options."""
         if user_input is not None:
-            return self.async_create_entry(title="", data={})
+            return self.async_create_entry(title="", data=user_input)
 
         # Build consent URL
         consent_url = self._build_consent_url()
+        
+        # Get current options
+        current_gateway = self.config_entry.options.get(CONF_LOCAL_GATEWAY_URL, "")
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema({
+                vol.Optional(
+                    CONF_LOCAL_GATEWAY_URL,
+                    default=current_gateway,
+                ): str,
+            }),
             description_placeholders={"consent_url": consent_url},
         )
 
