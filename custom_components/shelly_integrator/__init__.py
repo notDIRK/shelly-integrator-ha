@@ -68,7 +68,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     # Register webhook for user consent callback
-    webhook_id = f"{WEBHOOK_ID}_{entry.entry_id}"
+    # Use static webhook ID since we only allow one instance
+    webhook_id = WEBHOOK_ID
     webhook_register(
         hass,
         DOMAIN,

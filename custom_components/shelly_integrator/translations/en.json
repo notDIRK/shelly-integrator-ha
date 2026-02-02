@@ -7,6 +7,10 @@
         "data": {
           "integrator_token": "API Token"
         }
+      },
+      "consent": {
+        "title": "Grant Device Access",
+        "description": "Click the link below to grant access to your Shelly devices:\n\n**[Open Shelly Cloud Consent Page]({consent_url})**\n\nYou will be asked to log into your Shelly Cloud account and select which devices to share with Home Assistant.\n\nAfter granting access, click **Submit** below to complete setup."
       }
     },
     "error": {
@@ -16,6 +20,14 @@
     },
     "abort": {
       "already_configured": "Shelly Integrator is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Add More Devices",
+        "description": "Click the link below to grant access to additional Shelly devices:\n\n**[Open Shelly Cloud Consent Page]({consent_url})**\n\nSelect the devices you want to add, then click **Submit** below."
+      }
     }
   },
   "entity": {
