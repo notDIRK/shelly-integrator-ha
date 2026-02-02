@@ -1,7 +1,11 @@
-"""Light platform for Shelly Integrator."""
+"""Light platform for Shelly Integrator.
+
+Based on official Home Assistant Shelly integration patterns.
+"""
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from homeassistant.components.light import (
@@ -18,7 +22,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import ShellyIntegratorCoordinator, SIGNAL_NEW_DEVICE
-from .entity_factory import EntityType, discover_entities
+from .entity_descriptions import get_model_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,42 +38,40 @@ async def async_setup_entry(
     # Track which entities have been created (by unique_id)
     created_entities: set[str] = set()
 
-    def _create_lights(device_id: str) -> list[ShellyIntegratorLight]:
+    def _create_lights(device_id: str) -> list[LightEntity]:
         """Create light entities for a device based on its status."""
-        entities: list[ShellyIntegratorLight] = []
+        entities: list[LightEntity] = []
         device_data = coordinator.devices.get(device_id, {})
         status = device_data.get("status", {})
-        device_code = device_data.get("device_code", "")
         
         if not status:
-            _LOGGER.debug("No status data for device %s, skipping light creation", device_id)
+            _LOGGER.debug("No status data for device %s", device_id)
             return entities
 
-        # Discover all possible entities
-        discovered = discover_entities(status, device_code)
-        
-        # Filter for lights only
-        for entity_def in discovered:
-            if entity_def.entity_type != EntityType.LIGHT:
-                continue
-            
-            unique_id = f"{device_id}_light_{entity_def.channel}"
-            if unique_id in created_entities:
-                continue
-            
-            created_entities.add(unique_id)
-            entities.append(
-                ShellyIntegratorLight(
-                    coordinator=coordinator,
-                    device_id=device_id,
-                    channel=entity_def.channel,
-                    key=entity_def.key,
-                )
-            )
-        
+        # Gen1: lights array (dimmers, bulbs)
+        lights = status.get("lights", [])
+        for idx, _ in enumerate(lights):
+            unique_id = f"{device_id}_light_{idx}"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(ShellyLight(
+                    coordinator, device_id, idx, f"lights.{idx}", is_gen2=False
+                ))
+
+        # Gen2: light:N pattern
+        for key in status:
+            if match := re.match(r"light:(\d+)", key):
+                idx = int(match.group(1))
+                unique_id = f"{device_id}_light_{idx}"
+                if unique_id not in created_entities:
+                    created_entities.add(unique_id)
+                    entities.append(ShellyLight(
+                        coordinator, device_id, idx, key, is_gen2=True
+                    ))
+
         if entities:
             _LOGGER.info("Creating %d light entities for device %s", len(entities), device_id)
-        
+
         return entities
 
     @callback
@@ -80,7 +82,7 @@ async def async_setup_entry(
             async_add_entities(entities)
 
     # Add existing devices
-    entities: list[ShellyIntegratorLight] = []
+    entities: list[LightEntity] = []
     for device_id in list(coordinator.devices.keys()):
         entities.extend(_create_lights(device_id))
 
@@ -93,8 +95,8 @@ async def async_setup_entry(
     )
 
 
-class ShellyIntegratorLight(CoordinatorEntity[ShellyIntegratorCoordinator], LightEntity):
-    """Representation of a Shelly light."""
+class ShellyLight(CoordinatorEntity[ShellyIntegratorCoordinator], LightEntity):
+    """Shelly light entity."""
 
     _attr_has_entity_name = True
 
@@ -104,18 +106,17 @@ class ShellyIntegratorLight(CoordinatorEntity[ShellyIntegratorCoordinator], Ligh
         device_id: str,
         channel: int,
         key: str,
+        is_gen2: bool,
     ) -> None:
         """Initialize the light."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._channel = channel
-        self._key = key  # e.g., "lights.0" or "light:0"
-        self._is_gen2 = key.startswith("light:")
-        
+        self._key = key
+        self._is_gen2 = is_gen2
+
         self._attr_unique_id = f"{device_id}_light_{channel}"
         self._attr_name = "Light" if channel == 0 else f"Light {channel + 1}"
-
-        # Determine supported color modes based on device capabilities
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
         self._attr_color_mode = ColorMode.BRIGHTNESS
 
@@ -123,63 +124,60 @@ class ShellyIntegratorLight(CoordinatorEntity[ShellyIntegratorCoordinator], Ligh
     def device_info(self) -> DeviceInfo:
         """Return device info."""
         device_data = self.coordinator.devices.get(self._device_id, {})
+        device_code = device_data.get("device_code", "")
         status = device_data.get("status", {})
         
-        # Try to get friendly name
         name = device_data.get("name")
         if not name:
-            sys_info = status.get("sys", {}).get("device", {})
-            name = sys_info.get("name")
+            if self._is_gen2:
+                sys_info = status.get("sys", {}).get("device", {})
+                name = sys_info.get("name")
+            else:
+                getinfo = status.get("getinfo", {}).get("fw_info", {})
+                name = getinfo.get("device")
         if not name:
-            settings = device_data.get("settings", {})
-            name = settings.get("name")
-        if not name:
-            getinfo = status.get("getinfo", {}).get("fw_info", {})
-            name = getinfo.get("device")
-        
-        if not name:
-            device_code = device_data.get("device_code", "")
-            short_id = self._device_id[-6:] if len(self._device_id) > 6 else self._device_id
-            name = f"Shelly {device_code or ''} {short_id}".strip()
-
-        model = device_data.get("device_code") or device_data.get("device_type") or "Unknown"
+            name = get_model_name(device_code) if device_code else f"Shelly {self._device_id[-6:]}"
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._device_id)},
             name=name,
             manufacturer="Shelly",
-            model=model,
+            model=get_model_name(device_code) if device_code else "Unknown",
         )
-
-    @property
-    def _light_data(self) -> dict[str, Any]:
-        """Get current light data from coordinator."""
-        device = self.coordinator.devices.get(self._device_id, {})
-        status = device.get("status", {})
-
-        if self._is_gen2:
-            # Gen2 format: light:N
-            return status.get(self._key, {})
-        else:
-            # Gen1 format: lights array
-            lights = status.get("lights", [])
-            if len(lights) > self._channel:
-                return lights[self._channel]
-        return {}
 
     @property
     def is_on(self) -> bool | None:
         """Return true if light is on."""
-        data = self._light_data
+        device = self.coordinator.devices.get(self._device_id, {})
+        status = device.get("status", {})
+
         if self._is_gen2:
-            return data.get("output", False)
-        return data.get("ison", False)
+            light_data = status.get(self._key, {})
+            return light_data.get("output", False)
+        else:
+            lights = status.get("lights", [])
+            if len(lights) > self._channel:
+                return lights[self._channel].get("ison", False)
+
+        return None
 
     @property
     def brightness(self) -> int | None:
         """Return the brightness of the light (0-255)."""
+        device = self.coordinator.devices.get(self._device_id, {})
+        status = device.get("status", {})
+
+        if self._is_gen2:
+            light_data = status.get(self._key, {})
+            shelly_brightness = light_data.get("brightness", 0)
+        else:
+            lights = status.get("lights", [])
+            if len(lights) > self._channel:
+                shelly_brightness = lights[self._channel].get("brightness", 0)
+            else:
+                return None
+
         # Shelly uses 0-100, HA uses 0-255
-        shelly_brightness = self._light_data.get("brightness", 0)
         return round(shelly_brightness * 255 / 100)
 
     @property
@@ -190,15 +188,12 @@ class ShellyIntegratorLight(CoordinatorEntity[ShellyIntegratorCoordinator], Ligh
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        # Note: Shelly Integrator API doesn't support brightness in CommandRequest
-        # For now, just turn on - brightness needs JRPC method
         await self.coordinator.send_command(
             device_id=self._device_id,
             cmd="light",
             channel=self._channel,
             action="on",
         )
-        # Optimistic update
         self._update_local_state(True, None)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -209,7 +204,6 @@ class ShellyIntegratorLight(CoordinatorEntity[ShellyIntegratorCoordinator], Ligh
             channel=self._channel,
             action="off",
         )
-        # Optimistic update
         self._update_local_state(False, None)
 
     def _update_local_state(self, is_on: bool, brightness: int | None) -> None:
@@ -228,7 +222,7 @@ class ShellyIntegratorLight(CoordinatorEntity[ShellyIntegratorCoordinator], Ligh
                 lights[self._channel]["ison"] = is_on
                 if brightness is not None:
                     lights[self._channel]["brightness"] = brightness
-        
+
         self.async_write_ha_state()
 
     @callback

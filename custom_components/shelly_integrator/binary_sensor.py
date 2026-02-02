@@ -1,7 +1,11 @@
-"""Binary sensor platform for Shelly Integrator."""
+"""Binary sensor platform for Shelly Integrator.
+
+Based on official Home Assistant Shelly integration patterns.
+"""
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
@@ -17,23 +21,15 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import ShellyIntegratorCoordinator, SIGNAL_NEW_DEVICE
-from .entity_factory import EntityType, discover_entities, get_status_value
+from .entity_descriptions import (
+    BLOCK_BINARY_SENSORS,
+    RPC_BINARY_SENSORS,
+    BlockBinarySensorDescription,
+    RpcBinarySensorDescription,
+    get_model_name,
+)
 
 _LOGGER = logging.getLogger(__name__)
-
-# Map device_class strings to BinarySensorDeviceClass
-DEVICE_CLASS_MAP = {
-    "door": BinarySensorDeviceClass.DOOR,
-    "window": BinarySensorDeviceClass.WINDOW,
-    "motion": BinarySensorDeviceClass.MOTION,
-    "moisture": BinarySensorDeviceClass.MOISTURE,
-    "smoke": BinarySensorDeviceClass.SMOKE,
-    "heat": BinarySensorDeviceClass.HEAT,
-    "problem": BinarySensorDeviceClass.PROBLEM,
-    "power": BinarySensorDeviceClass.POWER,
-    "vibration": BinarySensorDeviceClass.VIBRATION,
-    "gas": BinarySensorDeviceClass.GAS,
-}
 
 
 async def async_setup_entry(
@@ -52,39 +48,25 @@ async def async_setup_entry(
         entities: list[BinarySensorEntity] = []
         device_data = coordinator.devices.get(device_id, {})
         status = device_data.get("status", {})
-        device_code = device_data.get("device_code", "")
         
         if not status:
-            _LOGGER.debug("No status data for device %s, skipping binary sensor creation", device_id)
+            _LOGGER.debug("No status data for device %s", device_id)
             return entities
 
-        # Discover all possible entities
-        discovered = discover_entities(status, device_code)
-        
-        # Filter for binary sensors only
-        for entity_def in discovered:
-            if entity_def.entity_type != EntityType.BINARY_SENSOR:
-                continue
-            
-            unique_id = f"{device_id}_binary_{entity_def.key.replace('.', '_').replace(':', '_')}"
-            if unique_id in created_entities:
-                continue
-            
-            created_entities.add(unique_id)
-            entities.append(
-                ShellyBinarySensor(
-                    coordinator=coordinator,
-                    device_id=device_id,
-                    key=entity_def.key,
-                    channel=entity_def.channel,
-                    name_suffix=entity_def.name_suffix or "Binary Sensor",
-                    device_class=entity_def.device_class,
-                )
-            )
-        
+        # Detect device generation based on status keys
+        is_gen2 = any(
+            re.match(r"switch:\d+|light:\d+|cover:\d+|input:\d+", key)
+            for key in status.keys()
+        )
+
+        if is_gen2:
+            entities.extend(_create_rpc_binary_sensors(device_id, status, created_entities, coordinator))
+        else:
+            entities.extend(_create_block_binary_sensors(device_id, status, created_entities, coordinator))
+
         if entities:
             _LOGGER.info("Creating %d binary sensor entities for device %s", len(entities), device_id)
-        
+
         return entities
 
     @callback
@@ -108,8 +90,164 @@ async def async_setup_entry(
     )
 
 
-class ShellyBinarySensor(CoordinatorEntity[ShellyIntegratorCoordinator], BinarySensorEntity):
-    """Generic Shelly binary sensor entity."""
+def _create_block_binary_sensors(
+    device_id: str,
+    status: dict[str, Any],
+    created_entities: set[str],
+    coordinator: ShellyIntegratorCoordinator,
+) -> list[BinarySensorEntity]:
+    """Create Gen1 Block binary sensors from status."""
+    entities: list[BinarySensorEntity] = []
+
+    # Inputs
+    inputs = status.get("inputs", [])
+    for idx, inp in enumerate(inputs):
+        if "input" in inp:
+            desc = BLOCK_BINARY_SENSORS.get("input")
+            if desc:
+                unique_id = f"{device_id}_input_{idx}"
+                if unique_id not in created_entities:
+                    created_entities.add(unique_id)
+                    entities.append(BlockBinarySensor(
+                        coordinator, device_id, desc, idx, "inputs", "input"
+                    ))
+
+    # Motion (Shelly Motion)
+    if "motion" in status:
+        desc = BLOCK_BINARY_SENSORS.get("motion")
+        if desc:
+            unique_id = f"{device_id}_motion"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(BlockBinarySensor(
+                    coordinator, device_id, desc, 0, None, "motion"
+                ))
+
+    # Door/Window sensor
+    sensor = status.get("sensor", {})
+    if sensor and "state" in sensor:
+        desc = BLOCK_BINARY_SENSORS.get("sensor_state")
+        if desc:
+            unique_id = f"{device_id}_door"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(BlockBinarySensor(
+                    coordinator, device_id, desc, 0, "sensor", "state"
+                ))
+
+    # Flood sensor
+    if "flood" in status:
+        desc = BLOCK_BINARY_SENSORS.get("flood")
+        if desc:
+            unique_id = f"{device_id}_flood"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(BlockBinarySensor(
+                    coordinator, device_id, desc, 0, None, "flood"
+                ))
+
+    # Smoke sensor
+    if "smoke" in status:
+        desc = BLOCK_BINARY_SENSORS.get("smoke")
+        if desc:
+            unique_id = f"{device_id}_smoke"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(BlockBinarySensor(
+                    coordinator, device_id, desc, 0, None, "smoke"
+                ))
+
+    # Gas alarm (binary version)
+    gas_sensor = status.get("gas_sensor", {})
+    if gas_sensor and "alarm_state" in gas_sensor:
+        desc = BLOCK_BINARY_SENSORS.get("gas_alarm")
+        if desc:
+            unique_id = f"{device_id}_gas_alarm_binary"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(BlockBinarySensor(
+                    coordinator, device_id, desc, 0, "gas_sensor", "alarm_state"
+                ))
+
+    # Overtemperature
+    if "overtemperature" in status:
+        desc = BLOCK_BINARY_SENSORS.get("overtemperature")
+        if desc:
+            unique_id = f"{device_id}_overtemperature"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(BlockBinarySensor(
+                    coordinator, device_id, desc, 0, None, "overtemperature"
+                ))
+
+    # Overpower (check in relays)
+    relays = status.get("relays", [])
+    for idx, relay in enumerate(relays):
+        if "overpower" in relay:
+            desc = BLOCK_BINARY_SENSORS.get("overpower")
+            if desc:
+                unique_id = f"{device_id}_overpower_{idx}"
+                if unique_id not in created_entities:
+                    created_entities.add(unique_id)
+                    entities.append(BlockBinarySensor(
+                        coordinator, device_id, desc, idx, "relays", "overpower"
+                    ))
+
+    # Vibration
+    if "vibration" in status:
+        desc = BLOCK_BINARY_SENSORS.get("vibration")
+        if desc:
+            unique_id = f"{device_id}_vibration"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(BlockBinarySensor(
+                    coordinator, device_id, desc, 0, None, "vibration"
+                ))
+
+    return entities
+
+
+def _create_rpc_binary_sensors(
+    device_id: str,
+    status: dict[str, Any],
+    created_entities: set[str],
+    coordinator: ShellyIntegratorCoordinator,
+) -> list[BinarySensorEntity]:
+    """Create Gen2/Gen3 RPC binary sensors from status."""
+    entities: list[BinarySensorEntity] = []
+
+    # Inputs (input:N)
+    for key in status:
+        if match := re.match(r"input:(\d+)", key):
+            idx = int(match.group(1))
+            input_data = status[key]
+            if "state" in input_data:
+                desc = RPC_BINARY_SENSORS.get("input")
+                if desc:
+                    unique_id = f"{device_id}_input_{idx}"
+                    if unique_id not in created_entities:
+                        created_entities.add(unique_id)
+                        entities.append(RpcBinarySensor(
+                            coordinator, device_id, desc, idx, key, "state"
+                        ))
+
+    # Cloud connectivity
+    cloud = status.get("cloud", {})
+    if "connected" in cloud:
+        desc = RPC_BINARY_SENSORS.get("cloud")
+        if desc:
+            unique_id = f"{device_id}_cloud"
+            if unique_id not in created_entities:
+                created_entities.add(unique_id)
+                entities.append(RpcBinarySensor(
+                    coordinator, device_id, desc, 0, "cloud", "connected"
+                ))
+
+    return entities
+
+
+class BlockBinarySensor(CoordinatorEntity[ShellyIntegratorCoordinator], BinarySensorEntity):
+    """Shelly Gen1 Block binary sensor entity."""
 
     _attr_has_entity_name = True
 
@@ -117,57 +255,53 @@ class ShellyBinarySensor(CoordinatorEntity[ShellyIntegratorCoordinator], BinaryS
         self,
         coordinator: ShellyIntegratorCoordinator,
         device_id: str,
-        key: str,
+        description: BlockBinarySensorDescription,
         channel: int,
-        name_suffix: str,
-        device_class: str | None,
+        status_key: str | None,
+        attr_key: str,
     ) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
         self._device_id = device_id
-        self._key = key
+        self._description = description
         self._channel = channel
-        
-        self._attr_unique_id = f"{device_id}_binary_{key.replace('.', '_').replace(':', '_')}"
-        self._attr_name = name_suffix
-        
-        if device_class and device_class in DEVICE_CLASS_MAP:
-            self._attr_device_class = DEVICE_CLASS_MAP[device_class]
+        self._status_key = status_key
+        self._attr_key = attr_key
+
+        self._attr_unique_id = f"{device_id}_{description.key}_{channel}"
+
+        # Add channel suffix if multiple channels
+        name = description.name or "Binary Sensor"
+        if channel > 0:
+            name = f"{name} {channel + 1}"
+        self._attr_name = name
+
+        if description.device_class:
+            self._attr_device_class = description.device_class
+        if description.entity_category:
+            self._attr_entity_category = description.entity_category
+        if description.icon:
+            self._attr_icon = description.icon
 
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info."""
         device_data = self.coordinator.devices.get(self._device_id, {})
+        device_code = device_data.get("device_code", "")
         
-        # Try to get friendly name
         name = device_data.get("name")
         if not name:
             status = device_data.get("status", {})
-            # Gen2 device name
-            sys_info = status.get("sys", {}).get("device", {})
-            name = sys_info.get("name")
-            if not name:
-                # Gen1 device name from settings
-                settings = device_data.get("settings", {})
-                name = settings.get("name")
-            if not name:
-                # Gen1 device name from getinfo
-                getinfo = status.get("getinfo", {}).get("fw_info", {})
-                name = getinfo.get("device")
-        
+            getinfo = status.get("getinfo", {}).get("fw_info", {})
+            name = getinfo.get("device")
         if not name:
-            # Fallback to device code + short ID
-            device_code = device_data.get("device_code", "")
-            short_id = self._device_id[-6:] if len(self._device_id) > 6 else self._device_id
-            name = f"Shelly {device_code or ''} {short_id}".strip()
-
-        model = device_data.get("device_code") or device_data.get("device_type") or "Unknown"
+            name = get_model_name(device_code) if device_code else f"Shelly {self._device_id[-6:]}"
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._device_id)},
             name=name,
             manufacturer="Shelly",
-            model=model,
+            model=get_model_name(device_code) if device_code else "Unknown",
         )
 
     @property
@@ -181,19 +315,120 @@ class ShellyBinarySensor(CoordinatorEntity[ShellyIntegratorCoordinator], BinaryS
         """Return true if the binary sensor is on."""
         device = self.coordinator.devices.get(self._device_id, {})
         status = device.get("status", {})
-        
-        value = get_status_value(status, self._key)
-        
+
+        # Direct status key (no container)
+        if self._status_key is None:
+            value = status.get(self._attr_key)
+        else:
+            container = status.get(self._status_key)
+            if container is None:
+                return None
+            # Handle arrays
+            if isinstance(container, list):
+                if self._channel >= len(container):
+                    return None
+                container = container[self._channel]
+            value = container.get(self._attr_key) if isinstance(container, dict) else None
+
         if value is None:
             return None
-        
-        # Handle different value types
+
+        # Apply transformation if defined
+        if self._description.value_fn:
+            return self._description.value_fn(value)
+
+        # Default boolean conversion
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
             return value > 0
         if isinstance(value, str):
-            # For door/window sensors: "open" = True, "close" = False
-            return value.lower() in ("open", "true", "on", "1")
+            return value.lower() in ("true", "on", "1", "open")
+
+        return None
+
+
+class RpcBinarySensor(CoordinatorEntity[ShellyIntegratorCoordinator], BinarySensorEntity):
+    """Shelly Gen2/Gen3 RPC binary sensor entity."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: ShellyIntegratorCoordinator,
+        device_id: str,
+        description: RpcBinarySensorDescription,
+        channel: int,
+        component_key: str,
+        attr_key: str,
+    ) -> None:
+        """Initialize the binary sensor."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._description = description
+        self._channel = channel
+        self._component_key = component_key
+        self._attr_key = attr_key
+
+        self._attr_unique_id = f"{device_id}_{component_key}_{attr_key}"
+
+        # Add channel suffix if multiple channels
+        name = description.name or "Binary Sensor"
+        if channel > 0:
+            name = f"{name} {channel + 1}"
+        self._attr_name = name
+
+        if description.device_class:
+            self._attr_device_class = description.device_class
+        if description.entity_category:
+            self._attr_entity_category = description.entity_category
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info."""
+        device_data = self.coordinator.devices.get(self._device_id, {})
+        device_code = device_data.get("device_code", "")
+        status = device_data.get("status", {})
         
+        name = device_data.get("name")
+        if not name:
+            sys_info = status.get("sys", {}).get("device", {})
+            name = sys_info.get("name")
+        if not name:
+            name = get_model_name(device_code) if device_code else f"Shelly {self._device_id[-6:]}"
+
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            name=name,
+            manufacturer="Shelly",
+            model=get_model_name(device_code) if device_code else "Unknown",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        device = self.coordinator.devices.get(self._device_id, {})
+        return device.get("online", False)
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if the binary sensor is on."""
+        device = self.coordinator.devices.get(self._device_id, {})
+        status = device.get("status", {})
+
+        component = status.get(self._component_key)
+        if component is None:
+            return None
+
+        value = component.get(self._attr_key)
+
+        if value is None:
+            return None
+
+        # Default boolean conversion
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value > 0
+
         return None
