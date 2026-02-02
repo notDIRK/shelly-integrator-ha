@@ -10,7 +10,18 @@
       },
       "consent": {
         "title": "Grant Device Access",
-        "description": "Click the link below to grant access to your Shelly devices:\n\n**[Open Shelly Cloud Consent Page]({consent_url})**\n\nYou will be asked to log into your Shelly Cloud account and select which devices to share with Home Assistant.\n\nAfter granting access, click **Submit** below to complete setup."
+        "description": "Click the link below to grant access to your Shelly devices:\n\n**[Open Shelly Cloud Consent Page]({consent_url})**\n\nYou will be asked to log into your Shelly Cloud account and select which devices to share with Home Assistant.\n\nAfter granting access, click **Submit** below to complete setup.",
+        "data": {
+          "local_gateway_url": "Local Gateway URL (optional, for historical data)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Shelly Integrator",
+        "description": "Update your settings below.\n\n**[Open Shelly Cloud Consent Page]({consent_url})**",
+        "data": {
+          "integrator_token": "API Token",
+          "local_gateway_url": "Local Gateway URL (optional, for historical data)"
+        }
       }
     },
     "error": {
@@ -19,18 +30,24 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "Shelly Integrator is already configured"
+      "already_configured": "Shelly Integrator is already configured",
+      "reconfigure_successful": "Configuration updated successfully"
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Shelly Integrator Options",
-        "description": "**Add More Devices:**\n[Open Shelly Cloud Consent Page]({consent_url})\n\n**Historical Data Import (Optional):**\nIf you have a local proxy to your Shelly EM devices, enter the base URL below.",
+        "description": "**Add More Devices:**\n[Open Shelly Cloud Consent Page]({consent_url})\n\n**Update Settings:**\nLeave API Token empty to keep current token.",
         "data": {
-          "local_gateway_url": "Local Gateway URL (e.g., https://myproxy.com/sensor)"
+          "integrator_token": "API Token (leave empty to keep current)",
+          "local_gateway_url": "Local Gateway URL (optional, for historical data)"
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Shelly Cloud API",
+      "invalid_auth": "Invalid API token"
     }
   },
   "entity": {
