@@ -68,7 +68,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     # Register webhook for user consent callback
-    # Use static webhook ID since we only allow one instance
     webhook_id = WEBHOOK_ID
     webhook_register(
         hass,
@@ -77,6 +76,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         webhook_id,
         lambda hass, webhook_id, request: handle_webhook(hass, entry.entry_id, request),
     )
+
+    # Auto-connect to default EU server (devices will appear when they send updates)
+    # This ensures stateless operation - no need to save server info
+    default_server = "shelly-187-eu.shelly.cloud"
+    _LOGGER.info("Auto-connecting to default server: %s", default_server)
+    await coordinator.connect_to_host(default_server)
 
     # Store webhook ID for unload
     hass.data[DOMAIN][f"{entry.entry_id}_webhook"] = webhook_id
@@ -149,49 +154,80 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def handle_webhook(
     hass: HomeAssistant, entry_id: str, request: web.Request
 ) -> web.Response:
-    """Handle webhook callback from Shelly Cloud user consent."""
+    """Handle webhook callback from Shelly Cloud user consent.
+    
+    Shelly Cloud sends ONE request PER DEVICE with format:
+    {
+        "userId": 123,
+        "deviceId": "abc123",
+        "deviceType": "SHPLG-1",
+        "deviceCode": "shellyplug",
+        "accessGroups": "01",
+        "action": "add" | "remove",
+        "host": "shelly-187-eu.shelly.cloud",
+        "name": ["Device Name"]
+    }
+    """
     try:
         data = await request.json()
-        _LOGGER.debug("Received webhook data: %s", data)
-
-        # Expected format from Shelly consent callback:
-        # {
-        #   "devices": [{"id": "...", "server": "..."}],
-        #   "user_api_url": "..."
-        # }
+        _LOGGER.info("Webhook received from Shelly Cloud: %s", data)
 
         coordinator: ShellyIntegratorCoordinator = hass.data[DOMAIN].get(entry_id)
         if not coordinator:
             _LOGGER.error("Coordinator not found for entry %s", entry_id)
             return web.Response(status=404)
 
-        devices = data.get("devices", [])
-        hosts_to_connect: set[str] = set()
+        # Extract device info from Shelly's callback format
+        device_id = data.get("deviceId")
+        host = data.get("host")
+        action = data.get("action", "add")
+        device_name = data.get("name", [])
+        device_type = data.get("deviceType")
+        device_code = data.get("deviceCode")
 
-        for device in devices:
-            device_id = device.get("id")
-            server = device.get("server")
+        if not device_id:
+            _LOGGER.error("Missing deviceId in webhook data: %s", data)
+            return web.Response(status=400)
 
-            if device_id and server:
-                coordinator._device_host_map[device_id] = server
-                hosts_to_connect.add(server)
-                _LOGGER.info("Device %s granted on server %s", device_id, server)
+        if action == "add":
+            _LOGGER.info(
+                "Device granted: id=%s, host=%s, type=%s, code=%s, name=%s",
+                device_id, host, device_type, device_code, device_name
+            )
 
-        # Connect to new hosts
-        for host in hosts_to_connect:
-            if host not in coordinator.hosts:
+            # Store device info in coordinator
+            if host:
+                coordinator._device_host_map[device_id] = host
+            
+            # Pre-populate device with name from Shelly Cloud
+            if device_id not in coordinator.devices:
+                coordinator.devices[device_id] = {}
+            
+            if device_name:
+                coordinator.devices[device_id]["name"] = device_name[0]
+            if device_type:
+                coordinator.devices[device_id]["device_type"] = device_type
+            if device_code:
+                coordinator.devices[device_id]["device_code"] = device_code
+
+            # Connect to the host if not already connected
+            if host and host not in coordinator.hosts:
+                _LOGGER.info("Connecting to new host: %s", host)
                 await coordinator.connect_to_host(host)
 
-        # Show success notification
-        if devices:
-            device_count = len(devices)
+            # Show notification
+            name_str = device_name[0] if device_name else device_id
             notify_create(
                 hass,
-                message=f"Successfully added {device_count} device(s) from Shelly Cloud. "
-                        "They will appear shortly in your devices list.",
-                title="Shelly Devices Added",
-                notification_id=f"{DOMAIN}_devices_added",
+                message=f"Device '{name_str}' added from Shelly Cloud.",
+                title="Shelly Device Added",
+                notification_id=f"{DOMAIN}_device_added",
             )
+
+        elif action == "remove":
+            _LOGGER.info("Device removed: id=%s", device_id)
+            coordinator._device_host_map.pop(device_id, None)
+            coordinator.devices.pop(device_id, None)
 
         return web.Response(text="OK", status=200)
 

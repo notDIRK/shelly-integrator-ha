@@ -45,7 +45,7 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         """Get the options flow for this handler."""
-        return ShellyIntegratorOptionsFlow()
+        return ShellyIntegratorOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -123,6 +123,10 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class ShellyIntegratorOptionsFlow(OptionsFlow):
     """Handle options flow for Shelly Integrator."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
