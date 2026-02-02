@@ -29,6 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_INTEGRATOR_TOKEN): str,
+        vol.Optional(CONF_LOCAL_GATEWAY_URL): str,
     }
 )
 
@@ -41,6 +42,7 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow."""
         self._token: str | None = None
+        self._gateway_url: str | None = None
 
     @staticmethod
     @callback
@@ -73,8 +75,9 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         await self.async_set_unique_id(INTEGRATOR_TAG)
                         self._abort_if_unique_id_configured()
 
-                        # Store token and proceed to consent step
+                        # Store token and gateway URL, proceed to consent step
                         self._token = token
+                        self._gateway_url = user_input.get(CONF_LOCAL_GATEWAY_URL)
                         return await self.async_step_consent()
 
             except aiohttp.ClientError:
@@ -95,10 +98,10 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the consent step - show link to grant device access."""
         if user_input is not None:
             # User clicked submit, create the entry
-            # Store gateway URL in options if provided
+            # Store gateway URL in options if provided (from step 1)
             options = {}
-            if user_input.get(CONF_LOCAL_GATEWAY_URL):
-                options[CONF_LOCAL_GATEWAY_URL] = user_input[CONF_LOCAL_GATEWAY_URL]
+            if self._gateway_url:
+                options[CONF_LOCAL_GATEWAY_URL] = self._gateway_url
 
             return self.async_create_entry(
                 title="Shelly Integrator",
@@ -111,9 +114,7 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="consent",
-            data_schema=vol.Schema({
-                vol.Optional(CONF_LOCAL_GATEWAY_URL): str,
-            }),
+            data_schema=vol.Schema({}),
             description_placeholders={"consent_url": consent_url},
         )
 
