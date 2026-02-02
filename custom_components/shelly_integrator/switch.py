@@ -140,8 +140,16 @@ class ShellyIntegratorSwitch(CoordinatorEntity[ShellyIntegratorCoordinator], Swi
 
         # Fall back to device type + short ID
         if not device_name:
+            # Try to get device type from Gen1 getinfo
+            if not device_type:
+                getinfo = status.get("getinfo", {}).get("fw_info", {})
+                device_type = getinfo.get("device", "").split("-")[0]  # e.g., "shellyem"
+
             short_id = self._device_id[-6:] if len(self._device_id) > 6 else self._device_id
             model_name = device_type or device_code or "Shelly"
+            # Capitalize model name for readability
+            if model_name.startswith("shelly"):
+                model_name = model_name.replace("shelly", "Shelly ")
             device_name = f"{model_name} {short_id}"
 
         return DeviceInfo(
