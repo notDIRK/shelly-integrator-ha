@@ -116,18 +116,26 @@ class HistoricalDataService:
     async def _auto_import_statistics(self, csv_files: list[str]) -> None:
         """Import statistics if homeassistant-statistics is available."""
         if not self._hass.services.has_service("import_statistics", "import_from_file"):
-            _LOGGER.debug("import_statistics service not available")
+            _LOGGER.info("import_statistics service not available, skipping auto-import")
             return
 
         for csv_file in csv_files:
             try:
+                # Service parameters must match import_statistics expected format
                 await self._hass.services.async_call(
                     "import_statistics",
                     "import_from_file",
-                    {"filename": csv_file, "delimiter": ","},
+                    {
+                        "filename": csv_file,
+                        "define_import_format": {
+                            "delimiter": ",",
+                            "decimal": "dot ('.')",
+                            "datetime_format": "%d.%m.%Y %H:%M",
+                        },
+                    },
                     blocking=True,
                 )
-                _LOGGER.info("Imported: %s", csv_file)
+                _LOGGER.info("Successfully imported: %s", csv_file)
             except Exception as err:
                 _LOGGER.error("Import failed for %s: %s", csv_file, err)
 
