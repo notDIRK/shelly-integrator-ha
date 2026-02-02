@@ -154,15 +154,22 @@ def build_statistic_id(hostname: str, channel: int) -> str:
 def build_output_filename(hostname: str, channel: int) -> str:
     """Build output filename for converted CSV.
     
+    Matches entity naming pattern:
+    - Channel 0 → shelly_import_shellyem_xxx_energy.csv
+    - Channel 1 → shelly_import_shellyem_xxx_energy_2.csv
+    
     Args:
         hostname: Device hostname
         channel: Channel number (0-indexed)
         
     Returns:
-        Filename (e.g., shelly_import_shellyem_xxx_ch1.csv)
+        Filename matching entity naming pattern
     """
     safe_hostname = hostname.lower().replace("-", "_")
-    return f"shelly_import_{safe_hostname}_ch{channel + 1}.csv"
+    if channel == 0:
+        return f"shelly_import_{safe_hostname}_energy.csv"
+    else:
+        return f"shelly_import_{safe_hostname}_energy_{channel + 1}.csv"
 
 
 async def convert_channel_csv(
