@@ -79,9 +79,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     hass.data[DOMAIN][f"{entry.entry_id}_webhook"] = WEBHOOK_ID
 
-    # Auto-connect to default server
+    # Auto-connect to default server and wait for devices
     _LOGGER.info("Connecting to default server: %s", DEFAULT_SERVER)
     await coordinator.connect_to_host(DEFAULT_SERVER)
+
+    # Wait for known devices to be verified before setting up platforms
+    await coordinator.async_wait_for_devices(timeout=5.0)
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

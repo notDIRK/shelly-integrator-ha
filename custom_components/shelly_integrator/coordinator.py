@@ -80,6 +80,7 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.devices: dict[str, Any] = {}
         self._device_host_map: dict[str, str] = {}
         self._token_refresh_unsub: Callable[[], None] | None = None
+        self._devices_ready = asyncio.Event()
 
         # Restore known devices from persistent storage
         self._restore_known_devices()
@@ -136,6 +137,26 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Return current device data (fallback polling)."""
         return self.devices
+
+    async def async_wait_for_devices(self, timeout: float = 5.0) -> bool:
+        """Wait for devices to be verified after connection.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            True if devices are ready, False if timeout
+        """
+        if not self._device_host_map:
+            # No known devices to wait for
+            return True
+
+        try:
+            await asyncio.wait_for(self._devices_ready.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            _LOGGER.warning("Timeout waiting for device verification")
+            return False
 
     async def async_config_entry_first_refresh(self) -> None:
         """Start connections on first refresh."""
@@ -291,6 +312,10 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
             self.async_set_updated_data(self.devices)
+
+            # Signal that at least one device is ready
+            if not self._devices_ready.is_set():
+                self._devices_ready.set()
 
             if is_new:
                 # Persist newly discovered device
