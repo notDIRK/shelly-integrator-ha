@@ -128,7 +128,7 @@ class HistoricalDataService:
                 filename = Path(csv_file).name
                 
                 # Parameters passed directly, not nested
-                # Include timezone so HA interprets timestamps correctly
+                # Timestamps in CSV are UTC - tell import service so HA stores correctly
                 await self._hass.services.async_call(
                     "import_statistics",
                     "import_from_file",
@@ -137,7 +137,7 @@ class HistoricalDataService:
                         "delimiter": ",",
                         "decimal": "dot ('.')",
                         "datetime_format": "%d.%m.%Y %H:%M",
-                        "timezone_identifier": str(self._hass.config.time_zone),
+                        "timezone_identifier": "UTC",
                     },
                     blocking=True,
                 )

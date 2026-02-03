@@ -16,10 +16,9 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
-from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -72,34 +71,26 @@ def parse_shelly_csv(csv_data: str) -> dict[str, float]:
 def convert_to_statistics_format(
     hourly_data: dict[str, float],
     statistic_id: str,
-    local_tz: str = "UTC",
 ) -> list[list[str]]:
     """Convert hourly energy data to homeassistant-statistics CSV rows.
     
+    Timestamps are kept in UTC - the import service will be told they are UTC
+    so HA can store them correctly (HA stores all statistics in UTC internally).
+    
     Args:
         hourly_data: Dictionary of hour timestamps (UTC) to energy deltas
-        statistic_id: The statistic ID (e.g., sensor:shellyem_xxx_ch1_energy)
-        local_tz: Local timezone name (e.g., "Europe/Istanbul")
+        statistic_id: The statistic ID (e.g., sensor.shellyem_xxx_energy)
         
     Returns:
         List of CSV rows including header
     """
     rows = [["statistic_id", "start", "delta", "unit"]]
     
-    try:
-        tz = ZoneInfo(local_tz)
-    except Exception:
-        _LOGGER.warning("Invalid timezone %s, using UTC", local_tz)
-        tz = ZoneInfo("UTC")
-    
     for hour_key in sorted(hourly_data.keys()):
         delta = hourly_data[hour_key]
-        # Parse as UTC
+        # Parse UTC timestamp and format for output (keep as UTC)
         dt_utc = datetime.strptime(hour_key, "%Y-%m-%d %H:%M")
-        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
-        # Convert to local timezone
-        dt_local = dt_utc.astimezone(tz)
-        formatted_time = dt_local.strftime("%d.%m.%Y %H:%M")
+        formatted_time = dt_utc.strftime("%d.%m.%Y %H:%M")
         rows.append([statistic_id, formatted_time, f"{delta:.2f}", "Wh"])
     
     return rows
@@ -204,9 +195,8 @@ async def convert_channel_csv(
             return None
         
         statistic_id = build_statistic_id(hostname, channel)
-        # Get timezone from HA config
-        local_tz = str(hass.config.time_zone)
-        rows = convert_to_statistics_format(hourly_data, statistic_id, local_tz)
+        # Keep timestamps in UTC - import service will be told they are UTC
+        rows = convert_to_statistics_format(hourly_data, statistic_id)
         
         output_filename = build_output_filename(hostname, channel)
         output_path = Path(config_path) / output_filename

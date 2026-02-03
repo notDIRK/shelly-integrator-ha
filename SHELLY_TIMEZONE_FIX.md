@@ -2,38 +2,30 @@
 
 ## Problem
 
-ApexCharts shows dates shifted by 1 day. For example, today is Feb 3 but the chart shows Feb 4 for today's data.
+ApexCharts shows dates shifted by 1 day when using statistics-based aggregation.
 
 ## Root Cause
 
 1. Shelly EM CSV data is in **UTC** (`Date/time UTC` column)
-2. Current conversion outputs timestamps in **local time** (Europe/Istanbul, UTC+3)
-3. `homeassistant-statistics` imports WITHOUT specifying timezone
-4. HA stores statistics in **UTC** internally
-5. When ApexCharts aggregates by day, the day boundaries are misaligned
+2. HA stores statistics in **UTC** internally
+3. ApexCharts aggregates by UTC day boundaries, not local day boundaries
+4. `homeassistant-statistics` import doesn't know the timezone of the input
 
-## Current Flow (Wrong)
+## Solution (Recommended)
 
-```
-Shelly CSV (UTC 21:00 Feb 2) 
-  → Convert to local (00:00 Feb 3 Istanbul) 
-  → Import (interpreted as local, stored as UTC Feb 2 21:00)
-  → Display aggregates by local day boundaries → MISMATCH
-```
-
-## Solution
-
-**Option A: Keep UTC throughout**
+### 1. Keep timestamps in UTC throughout
 
 ```python
-# In shelly-integrator-ha conversion:
-# Do NOT convert UTC to local time - keep as UTC
+from datetime import datetime
 
+# Parse UTC timestamp from Shelly CSV
 utc_time = datetime.strptime(row['Date/time UTC'], '%Y-%m-%d %H:%M')
-output_timestamp = utc_time.strftime('%d.%m.%Y %H:%M')  # Keep UTC
+
+# Output in UTC - do NOT convert to local time
+output_timestamp = utc_time.strftime('%d.%m.%Y %H:%M')
 ```
 
-Then import with `timezone_identifier: "UTC"`:
+### 2. Specify UTC timezone on import
 
 ```python
 await hass.services.async_call(
@@ -44,27 +36,47 @@ await hass.services.async_call(
         "delimiter": ",",
         "decimal": ".",
         "datetime_format": "%d.%m.%Y %H:%M",
-        "timezone_identifier": "UTC",  # CRITICAL
+        "timezone_identifier": "UTC",  # CRITICAL - tell import the timestamps are UTC
         "unit_from_entity": True,
     },
 )
 ```
 
-**Option B: Specify timezone on import (Quick fix)**
-
-Keep current conversion (local time output) but add timezone to import:
+### 3. Use HA's timezone utilities (for any local time needs)
 
 ```python
-"timezone_identifier": "Europe/Istanbul",
+from homeassistant.util import dt as dt_util
+
+# Get HA's configured timezone dynamically (don't hardcode!)
+local_tz = dt_util.DEFAULT_TIME_ZONE
+
+# Convert UTC to local if needed for display
+local_time = utc_time.replace(tzinfo=dt_util.UTC).astimezone(local_tz)
+
+# Convert local to UTC for storage
+utc_time = local_time.astimezone(dt_util.UTC)
 ```
 
-## Testing
+## Why This Works
 
-After fix, verify:
-1. Today's date (Feb 3) should show Feb 3 in tooltip
-2. Day boundaries should align with local midnight
+- HA stores all statistics in UTC
+- By importing with `timezone_identifier: "UTC"`, HA knows the timestamps are already UTC
+- HA's recorder and frontend handle timezone conversion for display
+- Works for users in ANY timezone
 
-## Files to Update
+## Files to Update in shelly-integrator-ha
 
-- `shelly-integrator-ha/custom_components/shelly_integrator/csv_converter.py`
-- Service call in `__init__.py` or wherever import is called
+1. **`csv_converter.py`** (or equivalent):
+   - Keep Shelly CSV timestamps as UTC
+   - Don't convert to local time
+
+2. **`__init__.py`** (service call):
+   - Add `"timezone_identifier": "UTC"` to import_statistics call
+
+## Dashboard Note
+
+For accurate daily aggregation by local timezone, users should use:
+- HA's native **Energy Dashboard** (handles timezone correctly)
+- **`utility_meter`** sensors (aggregates by local day)
+
+ApexCharts statistics mode aggregates by UTC day, which may not match local day boundaries.
