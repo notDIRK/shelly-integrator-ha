@@ -29,6 +29,7 @@ class ShellyWebSocket:
         session: ClientSession,
         jwt_token_provider: Callable[[], str],
         message_handler: Callable[[dict, str], Any],
+        on_connected: Callable[[str], Any] | None = None,
     ) -> None:
         """Initialize WebSocket manager.
 
@@ -36,10 +37,12 @@ class ShellyWebSocket:
             session: aiohttp client session
             jwt_token_provider: Callable that returns current JWT token
             message_handler: Async callback for incoming messages (message, host)
+            on_connected: Async callback when connection is established (host)
         """
         self._session = session
         self._get_jwt_token = jwt_token_provider
         self._message_handler = message_handler
+        self._on_connected = on_connected
         self._connections: dict[str, aiohttp.ClientWebSocketResponse] = {}
         self._tasks: list[asyncio.Task] = []
         self._running = False
@@ -231,6 +234,13 @@ class ShellyWebSocket:
         async with self._session.ws_connect(url, ssl=True) as ws:
             self._connections[host] = ws
             _LOGGER.info("WebSocket connected to %s", host)
+
+            # Notify coordinator that connection is established
+            if self._on_connected:
+                try:
+                    await self._on_connected(host)
+                except Exception as err:
+                    _LOGGER.error("on_connected callback failed: %s", err)
 
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:

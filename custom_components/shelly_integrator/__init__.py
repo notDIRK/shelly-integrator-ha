@@ -62,6 +62,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         tag="ITG_OSS",
         token=token,
         jwt_token=jwt_token,
+        entry=entry,
     )
 
     await coordinator.async_config_entry_first_refresh()

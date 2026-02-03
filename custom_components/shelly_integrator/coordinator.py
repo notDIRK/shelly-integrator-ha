@@ -7,9 +7,10 @@ This is a thin orchestrator that coordinates:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import aiohttp
 from homeassistant.core import HomeAssistant
@@ -21,9 +22,13 @@ from .api.auth import ShellyAuth
 from .api.websocket import ShellyWebSocket
 from .const import DOMAIN, TOKEN_REFRESH_INTERVAL
 
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+
 _LOGGER = logging.getLogger(__name__)
 
 SIGNAL_NEW_DEVICE = f"{DOMAIN}_new_device"
+CONF_KNOWN_DEVICES = "known_devices"
 
 
 class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -39,6 +44,7 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         tag: str,
         token: str,
         jwt_token: str,
+        entry: "ConfigEntry",
     ) -> None:
         """Initialize the coordinator.
 
@@ -48,6 +54,7 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             tag: Integrator tag
             token: User's integrator token
             jwt_token: Initial JWT token
+            entry: Config entry (for persistent storage)
         """
         super().__init__(
             hass,
@@ -55,6 +62,8 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=DOMAIN,
             update_interval=timedelta(seconds=30),
         )
+
+        self._entry = entry
 
         # API layer
         self._auth = ShellyAuth(session, tag, token)
@@ -64,6 +73,7 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             session=session,
             jwt_token_provider=lambda: self._auth.jwt_token,
             message_handler=self._handle_ws_message,
+            on_connected=self._on_ws_connected,
         )
 
         # Device state
@@ -71,10 +81,57 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._device_host_map: dict[str, str] = {}
         self._token_refresh_unsub: Callable[[], None] | None = None
 
+        # Restore known devices from persistent storage
+        self._restore_known_devices()
+
     @property
     def hosts(self) -> set[str]:
         """Return connected hosts."""
         return self._websocket.connected_hosts
+
+    def _restore_known_devices(self) -> None:
+        """Restore known devices from persistent storage."""
+        known = self._entry.data.get(CONF_KNOWN_DEVICES, {})
+        if known:
+            _LOGGER.info("Restoring %d known devices from storage", len(known))
+            for device_id, host in known.items():
+                self._device_host_map[device_id] = host
+                # Initialize empty device entry
+                self.devices[device_id] = {"online": False}
+
+    async def _persist_known_devices(self) -> None:
+        """Persist known devices to storage."""
+        if not self._device_host_map:
+            return
+
+        current_known = self._entry.data.get(CONF_KNOWN_DEVICES, {})
+        if current_known == self._device_host_map:
+            return  # No changes
+
+        _LOGGER.debug("Persisting %d known devices", len(self._device_host_map))
+        new_data = {**self._entry.data, CONF_KNOWN_DEVICES: dict(self._device_host_map)}
+        self.hass.config_entries.async_update_entry(self._entry, data=new_data)
+
+    async def _on_ws_connected(self, host: str) -> None:
+        """Handle WebSocket connection established.
+
+        Request status for all known devices on this host.
+        """
+        _LOGGER.info("WebSocket connected to %s, requesting device status", host)
+
+        devices_on_host = [
+            did for did, h in self._device_host_map.items() if h == host
+        ]
+
+        if not devices_on_host:
+            _LOGGER.debug("No known devices on host %s", host)
+            return
+
+        _LOGGER.info("Requesting status for %d devices on %s", len(devices_on_host), host)
+        for device_id in devices_on_host:
+            await self._websocket.send_action_request(host, "DeviceVerify", device_id)
+            # Small delay to avoid flooding
+            await asyncio.sleep(0.1)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Return current device data (fallback polling)."""
@@ -100,17 +157,12 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Token refresh failed: %s", err)
 
     async def connect_to_host(self, host: str) -> None:
-        """Connect to a Shelly Cloud WebSocket server."""
-        await self._websocket.connect(host)
+        """Connect to a Shelly Cloud WebSocket server.
 
-        # Request status for devices on this host
-        devices_on_host = [
-            did for did, h in self._device_host_map.items() if h == host
-        ]
-        for device_id in devices_on_host:
-            await self._websocket.send_action_request(
-                host, "DeviceVerify", device_id
-            )
+        Device status requests are handled by _on_ws_connected callback
+        once the connection is actually established.
+        """
+        await self._websocket.connect(host)
 
     async def send_command(
         self,
@@ -241,6 +293,8 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.async_set_updated_data(self.devices)
 
             if is_new:
+                # Persist newly discovered device
+                await self._persist_known_devices()
                 async_dispatcher_send(self.hass, SIGNAL_NEW_DEVICE, device_id)
 
     async def _handle_status_change(self, message: dict, host: str) -> None:
@@ -265,6 +319,8 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.async_set_updated_data(self.devices)
 
         if is_new:
+            # Persist newly discovered device
+            await self._persist_known_devices()
             # Request settings for new device
             await self._websocket.send_action_request(
                 host, "DeviceGetSettings", device_id
