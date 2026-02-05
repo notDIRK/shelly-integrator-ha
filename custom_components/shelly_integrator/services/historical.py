@@ -1,17 +1,22 @@
 """Historical data sync service for Shelly Integrator.
 
-Handles fetching and converting historical energy data from EM devices.
+Handles fetching and importing historical energy data from EM devices.
+Uses Home Assistant's native statistics API for direct import.
 """
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+from homeassistant.components.recorder.statistics import async_import_statistics
 from homeassistant.helpers.event import async_track_time_interval
 
-from ..const import CONF_LOCAL_GATEWAY_URL, DOMAIN, HISTORICAL_SYNC_INTERVAL
-from ..utils.csv_converter import convert_channel_csv
+from ..const import CONF_LOCAL_GATEWAY_URL, HISTORICAL_SYNC_INTERVAL
+from ..utils.csv_converter import (
+    build_statistic_id,
+    parse_shelly_csv_for_import,
+)
 from ..utils.http import fetch_csv_from_gateway
 from .notifications import NotificationService
 
@@ -54,7 +59,7 @@ class HistoricalDataService:
         return self._entry.options.get(CONF_LOCAL_GATEWAY_URL, "")
 
     async def handle_service_call(self, call: ServiceCall) -> None:
-        """Handle convert_historical_data service call.
+        """Handle download_and_convert_history service call.
 
         Args:
             call: Service call data
@@ -67,12 +72,11 @@ class HistoricalDataService:
             self._notifications.show_gateway_url_missing()
             return
 
-        output_files = await self.sync_data(gateway_url, device_id)
+        # sync_data now imports directly using native HA API
+        imported_stats = await self.sync_data(gateway_url, device_id)
 
-        if output_files:
-            # Auto-import after conversion
-            await self._auto_import_statistics(output_files)
-            self._notifications.show_historical_success(output_files)
+        if imported_stats:
+            self._notifications.show_historical_success(imported_stats)
         else:
             self._notifications.show_historical_error(
                 "No EM devices found or failed to fetch data. Check logs."
@@ -106,44 +110,77 @@ class HistoricalDataService:
         """Run automatic sync."""
         _LOGGER.info("Starting automatic historical sync")
         try:
-            output_files = await self.sync_data(self.gateway_url)
-            if output_files:
-                _LOGGER.info("Sync complete: %s", ", ".join(output_files))
-                await self._auto_import_statistics(output_files)
+            # sync_data imports directly using native HA API
+            imported_stats = await self.sync_data(self.gateway_url)
+            if imported_stats:
+                _LOGGER.info("Sync complete: %s", ", ".join(imported_stats))
             else:
-                _LOGGER.warning("Sync complete: No files created")
+                _LOGGER.warning("Sync complete: No statistics imported")
         except Exception as err:
             _LOGGER.error("Auto sync failed: %s", err)
 
-    async def _auto_import_statistics(self, csv_files: list[str]) -> None:
-        """Import statistics if homeassistant-statistics is available."""
-        if not self._hass.services.has_service("import_statistics", "import_from_file"):
-            _LOGGER.info("import_statistics service not available, skipping auto-import")
-            return
+    async def _import_statistics_native(
+        self,
+        statistic_id: str,
+        data: list[tuple[datetime, float]],
+    ) -> bool:
+        """Import statistics using Home Assistant's native API.
+        
+        This bypasses the import_statistics HACS integration and its
+        65-minute timestamp restriction.
+        
+        Args:
+            statistic_id: The entity ID (e.g., sensor.shellyem_xxx_energy)
+            data: List of (datetime_utc, delta_wh) tuples
+            
+        Returns:
+            True if import was successful
+        """
+        if not data:
+            return False
 
-        for csv_file in csv_files:
-            try:
-                # Extract just filename - import_statistics prepends /config/
-                from pathlib import Path
-                filename = Path(csv_file).name
-                
-                # Parameters passed directly, not nested
-                # Timestamps in CSV are UTC - tell import service so HA stores correctly
-                await self._hass.services.async_call(
-                    "import_statistics",
-                    "import_from_file",
-                    {
-                        "filename": filename,
-                        "delimiter": ",",
-                        "decimal": "dot ('.')",
-                        "datetime_format": "%d.%m.%Y %H:%M",
-                        "timezone_identifier": "UTC",
-                    },
-                    blocking=True,
+        try:
+            # Build StatisticMetaData
+            from homeassistant.components.recorder.models import (
+                StatisticData,
+                StatisticMetaData,
+            )
+            
+            metadata = StatisticMetaData(
+                statistic_id=statistic_id,
+                source="recorder",
+                name=f"Shelly Energy ({statistic_id})",
+                unit_of_measurement="Wh",
+                has_sum=True,
+                has_mean=False,
+            )
+            
+            # Convert to StatisticData objects with cumulative sum
+            statistics: list[StatisticData] = []
+            cumulative_sum = 0.0
+            
+            for dt_utc, delta in data:
+                cumulative_sum += delta
+                statistics.append(
+                    StatisticData(
+                        start=dt_utc,
+                        sum=cumulative_sum,
+                        state=delta,
+                    )
                 )
-                _LOGGER.info("Successfully imported: %s", csv_file)
-            except Exception as err:
-                _LOGGER.error("Import failed for %s: %s", csv_file, err)
+            
+            # Import using HA's native API - no 65-minute restriction!
+            async_import_statistics(self._hass, metadata, statistics)
+            
+            _LOGGER.info(
+                "Imported %d statistics for %s (total: %.2f Wh)",
+                len(statistics), statistic_id, cumulative_sum
+            )
+            return True
+            
+        except Exception as err:
+            _LOGGER.error("Native import failed for %s: %s", statistic_id, err)
+            return False
 
     def cancel_auto_sync(self) -> None:
         """Cancel automatic sync."""
@@ -157,13 +194,16 @@ class HistoricalDataService:
         device_id: str | None = None,
     ) -> list[str]:
         """Sync historical data from EM devices.
+        
+        Downloads CSV data from gateway and imports directly to HA statistics
+        using the native recorder API (no 65-minute timestamp restriction).
 
         Args:
             gateway_url: Base gateway URL
             device_id: Optional specific device ID
 
         Returns:
-            List of created file paths
+            List of successfully imported statistic IDs
         """
         if not gateway_url:
             _LOGGER.error("No gateway URL provided")
@@ -172,7 +212,7 @@ class HistoricalDataService:
         gateway_url = gateway_url.rstrip("/")
         _LOGGER.info("Starting sync from %s", gateway_url)
 
-        output_files: list[str] = []
+        imported_stats: list[str] = []
         em_devices = self._find_em_devices(device_id)
 
         if not em_devices:
@@ -195,18 +235,24 @@ class HistoricalDataService:
                 if not csv_data:
                     continue
 
-                output_file = await convert_channel_csv(
-                    hass=self._hass,
-                    csv_data=csv_data,
-                    hostname=hostname,
-                    channel=channel,
-                    config_path=self._hass.config.path(),
-                )
-                if output_file:
-                    output_files.append(output_file)
+                # Parse CSV data
+                data = parse_shelly_csv_for_import(csv_data)
+                if not data:
+                    _LOGGER.warning(
+                        "No valid data for %s channel %d", hostname, channel
+                    )
+                    continue
 
-        _LOGGER.info("Sync complete. Created %d files", len(output_files))
-        return output_files
+                # Build statistic ID
+                statistic_id = build_statistic_id(hostname, channel)
+                
+                # Import directly to HA statistics (native API)
+                success = await self._import_statistics_native(statistic_id, data)
+                if success:
+                    imported_stats.append(statistic_id)
+
+        _LOGGER.info("Sync complete. Imported %d statistics", len(imported_stats))
+        return imported_stats
 
     def _find_em_devices(
         self,

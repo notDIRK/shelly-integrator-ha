@@ -1,22 +1,18 @@
 """CSV Converter for Shelly EM Historical Data.
 
-Converts Shelly EM energy CSV data to a format compatible with
-the homeassistant-statistics HACS integration.
+Converts Shelly EM energy CSV data to statistics format.
+Supports both CSV file export and direct HA native statistics import.
 
 Shelly EM CSV format (input):
     Date/time UTC,Active energy Wh (1),Returned energy Wh (1),Min V,Max V
     2025-12-27 00:00,2.10,0.00,232.0,233.5
-
-Output format (for homeassistant-statistics delta import):
-    statistic_id,start,delta,unit
-    sensor:shellyem_48e729689b2b_ch1_energy,27.12.2025 00:00,2.10,Wh
 """
 from __future__ import annotations
 
 import csv
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -66,6 +62,27 @@ def parse_shelly_csv(csv_data: str) -> dict[str, float]:
             continue
     
     return hourly_data
+
+
+def parse_shelly_csv_for_import(csv_data: str) -> list[tuple[datetime, float]]:
+    """Parse Shelly EM CSV data for direct HA statistics import.
+    
+    Args:
+        csv_data: Raw CSV string from Shelly EM device
+        
+    Returns:
+        List of (datetime_utc, delta_wh) tuples, sorted by time
+    """
+    hourly_data = parse_shelly_csv(csv_data)
+    
+    result = []
+    for hour_key in sorted(hourly_data.keys()):
+        dt_utc = datetime.strptime(hour_key, "%Y-%m-%d %H:%M")
+        dt_utc = dt_utc.replace(tzinfo=timezone.utc)
+        delta = hourly_data[hour_key]
+        result.append((dt_utc, delta))
+    
+    return result
 
 
 def convert_to_statistics_format(
