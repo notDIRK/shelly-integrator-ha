@@ -5,6 +5,7 @@ Uses Home Assistant's native statistics API for direct import.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -111,9 +112,13 @@ class HistoricalDataService:
         )
 
     async def _on_ha_started(self, _hass: HomeAssistant) -> None:
-        """Run initial historical sync after HA startup completes."""
-        _LOGGER.info("HA started, running initial historical sync")
-        await self._run_auto_sync()
+        """Run initial historical sync after HA startup completes.
+        
+        Runs as a background task so it doesn't block HA startup.
+        """
+        _LOGGER.info("HA started, scheduling initial historical sync")
+        # Create background task so sync doesn't block startup
+        asyncio.create_task(self._run_auto_sync())
 
     async def _run_auto_sync(self, now=None) -> None:
         """Run automatic sync."""
