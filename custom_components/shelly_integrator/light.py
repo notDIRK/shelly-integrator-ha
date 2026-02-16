@@ -159,17 +159,12 @@ class ShellyLight(ShellyBaseEntity, LightEntity):
     async def _send_light_command(
         self, on: bool, brightness: int | None = None
     ) -> dict | None:
-        """Send the appropriate command for Gen1 or Gen2 light."""
-        if self._is_gen2:
-            params: dict[str, Any] = {"id": self._channel, "on": on}
-            if brightness is not None:
-                params["brightness"] = int(brightness * 100 / 255)
-            return await self.coordinator.send_jrpc_command(
-                device_id=self._device_id,
-                method="Light.Set",
-                params=params,
-            )
-        # Gen1: relay-style command with optional brightness param
+        """Send the appropriate command for Gen1 or Gen2 light.
+
+        NOTE: When using Shelly Cloud Integrator API, even Gen2 devices
+        use CommandRequest (cmd: "light") format, not JrpcRequest.
+        """
+        # For cloud integrator API, use CommandRequest for all devices
         extra: dict[str, Any] | None = None
         if brightness is not None:
             extra = {"brightness": int(brightness * 100 / 255)}

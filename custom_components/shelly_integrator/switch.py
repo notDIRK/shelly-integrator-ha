@@ -132,13 +132,13 @@ class ShellySwitch(ShellyBaseEntity, SwitchEntity):
         self._update_local_state(False)
 
     async def _send_switch_command(self, on: bool) -> dict | None:
-        """Send the appropriate command for Gen1 or Gen2 switch."""
-        if self._is_gen2:
-            return await self.coordinator.send_jrpc_command(
-                device_id=self._device_id,
-                method="Switch.Set",
-                params={"id": self._channel, "on": on},
-            )
+        """Send the appropriate command for Gen1 or Gen2 switch.
+        
+        NOTE: When using Shelly Cloud Integrator API, even Gen2 devices
+        use CommandRequest (cmd: "relay") format, not JrpcRequest.
+        JrpcRequest is only for advanced RPC methods like Thermostat.SetConfig.
+        """
+        # For cloud integrator API, use CommandRequest for all devices
         return await self.coordinator.send_command(
             device_id=self._device_id,
             cmd="relay",
