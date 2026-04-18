@@ -25,6 +25,7 @@
     "error": {
       "cannot_connect": "Failed to connect to Shelly Cloud API",
       "invalid_auth": "Invalid API token",
+      "invalid_gateway_url": "Local gateway URL must be http(s) and not point at localhost",
       "unknown": "Unexpected error"
     },
     "abort": {
@@ -45,7 +46,8 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to Shelly Cloud API",
-      "invalid_auth": "Invalid API token"
+      "invalid_auth": "Invalid API token",
+      "invalid_gateway_url": "Local gateway URL must be http(s) and not point at localhost"
     }
   },
   "services": {

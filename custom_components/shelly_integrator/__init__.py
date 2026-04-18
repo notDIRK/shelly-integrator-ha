@@ -8,6 +8,7 @@ This is the main entry point that orchestrates:
 from __future__ import annotations
 
 import logging
+import secrets
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -28,7 +29,8 @@ from .const import (
     INTEGRATOR_TAG,
     PLATFORMS,
     CONF_INTEGRATOR_TOKEN,
-    WEBHOOK_ID,
+    CONF_WEBHOOK_ID,
+    WEBHOOK_ID_LEGACY,
 )
 from .coordinator import ShellyIntegratorCoordinator
 from .api.auth import ShellyAuth
@@ -49,6 +51,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     session = async_get_clientsession(hass)
     token = entry.data[CONF_INTEGRATOR_TOKEN]
+
+    # Migrate entries that predate the per-install randomised webhook id
+    # (or had the legacy hardcoded one). Anyone reaching an HA instance
+    # externally could previously POST to a guessable webhook URL — the
+    # new per-install id moves that from public-fact to shared-secret.
+    webhook_id = entry.data.get(CONF_WEBHOOK_ID)
+    if not webhook_id or webhook_id == WEBHOOK_ID_LEGACY:
+        webhook_id = secrets.token_urlsafe(16)
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_WEBHOOK_ID: webhook_id},
+        )
+        _LOGGER.info("Generated per-install webhook id for config entry")
 
     # Initialize authentication
     auth = ShellyAuth(session, INTEGRATOR_TAG, token)
@@ -71,16 +86,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    # Set up webhook
+    # Set up webhook (per-install randomised id — see migration above)
     webhook_handler = WebhookHandler(hass, coordinator)
     webhook_register(
         hass,
         DOMAIN,
         "Shelly Integrator Callback",
-        WEBHOOK_ID,
+        webhook_id,
         lambda h, w, r: webhook_handler.handle_request(r),
     )
-    hass.data[DOMAIN][f"{entry.entry_id}_webhook"] = WEBHOOK_ID
+    hass.data[DOMAIN][f"{entry.entry_id}_webhook"] = webhook_id
 
     # Auto-connect to default server and wait for devices
     _LOGGER.info("Connecting to default server: %s", DEFAULT_SERVER)
@@ -100,7 +115,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     notifications = NotificationService(hass)
     try:
         ha_url = get_url(hass, prefer_external=True)
-        consent_url = build_consent_url(INTEGRATOR_TAG, ha_url, WEBHOOK_ID)
+        consent_url = build_consent_url(INTEGRATOR_TAG, ha_url, webhook_id)
         notifications.show_setup_notification(consent_url)
         _LOGGER.info("Consent URL: %s", consent_url)
     except Exception as err:

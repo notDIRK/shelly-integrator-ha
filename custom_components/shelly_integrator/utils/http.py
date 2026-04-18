@@ -5,11 +5,44 @@ Contains async HTTP request helpers.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+from urllib.parse import urlparse
 
 import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def validate_gateway_url(raw: str) -> str:
+    """Normalise and validate a user-supplied local gateway URL.
+
+    Rejects non-http(s) schemes and loopback targets so an operator cannot
+    accidentally point the integration at the HA host itself (SSRF guard).
+    Returns the URL with any trailing slash trimmed.
+
+    Raises:
+        ValueError: if the URL fails any check. Message is user-facing.
+    """
+    if not raw or not raw.strip():
+        raise ValueError("empty")
+    parsed = urlparse(raw.strip())
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("invalid_scheme")
+    if not parsed.hostname:
+        raise ValueError("invalid_host")
+    host = parsed.hostname.lower()
+    if host in ("localhost", "ip6-localhost", "ip6-loopback"):
+        raise ValueError("loopback_blocked")
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback or ip.is_unspecified:
+            raise ValueError("loopback_blocked")
+    except ValueError as err:
+        # Not an IP literal — only re-raise our own signal.
+        if str(err) in ("loopback_blocked",):
+            raise
+    return raw.strip().rstrip("/")
 
 
 async def fetch_csv_from_gateway(
@@ -32,7 +65,13 @@ async def fetch_csv_from_gateway(
     Returns:
         Raw CSV data string, or None on failure
     """
-    url = f"{gateway_url}/{hostname}/emeter/{channel}/em_data.csv"
+    try:
+        safe_base = validate_gateway_url(gateway_url)
+    except ValueError as err:
+        _LOGGER.warning("Refusing unsafe gateway URL %r: %s", gateway_url, err)
+        return None
+
+    url = f"{safe_base}/{hostname}/emeter/{channel}/em_data.csv"
 
     _LOGGER.debug("Fetching CSV from %s", url)
 

@@ -61,8 +61,10 @@ class WebhookHandler:
 
             return web.Response(text="OK", status=200)
 
-        except Exception as err:
-            _LOGGER.error("Webhook error: %s", err)
+        except Exception:
+            # Preserve traceback for diagnostics; avoid echoing raw
+            # error text (may contain payload fragments / device IDs).
+            _LOGGER.exception("Webhook handler failed")
             return web.Response(status=500)
 
     async def _handle_device_add(self, payload) -> None:

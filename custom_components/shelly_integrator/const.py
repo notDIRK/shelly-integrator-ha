@@ -20,6 +20,7 @@ WSS_PATH = "/shelly/wss/hk_sock"
 # Config keys (TOKEN entered by user, stored securely by HA)
 CONF_INTEGRATOR_TOKEN = "integrator_token"
 CONF_LOCAL_GATEWAY_URL = "local_gateway_url"
+CONF_WEBHOOK_ID = "webhook_id"
 
 # Token refresh interval (23 hours to be safe, token valid 24h)
 TOKEN_REFRESH_INTERVAL = 23 * 60 * 60
@@ -42,7 +43,9 @@ PLATFORMS = [
 ]
 
 # Webhook
-WEBHOOK_ID = "shelly_integrator_callback"
+# Legacy default — only used to migrate entries that predate the per-install
+# randomised webhook_id stored under CONF_WEBHOOK_ID in entry.data.
+WEBHOOK_ID_LEGACY = "shelly_integrator_callback"
 
 # Gen2/Gen3 detection pattern (shared across all platforms)
 _GEN2_PATTERN = re.compile(r"switch:\d+|light:\d+|cover:\d+|input:\d+")

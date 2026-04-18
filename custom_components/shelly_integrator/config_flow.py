@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any
 
 import aiohttp
@@ -19,10 +20,11 @@ from .const import (
     INTEGRATOR_TAG,
     CONF_INTEGRATOR_TOKEN,
     CONF_LOCAL_GATEWAY_URL,
+    CONF_WEBHOOK_ID,
     SHELLY_CONSENT_URL,
-    WEBHOOK_ID,
 )
 from .core.consent import build_consent_url
+from .utils import validate_gateway_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._token: str | None = None
         self._gateway_url: str | None = None
+        self._webhook_id: str | None = None
 
     @staticmethod
     @callback
@@ -59,32 +62,44 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             token = user_input[CONF_INTEGRATOR_TOKEN]
 
-            # Validate credentials by trying to get JWT
-            try:
-                session = async_get_clientsession(self.hass)
-                async with session.post(
-                    API_GET_TOKEN,
-                    data={"itg": INTEGRATOR_TAG, "token": token},
-                ) as response:
-                    data = await response.json()
+            # Validate optional gateway URL before hitting the network
+            raw_gw = user_input.get(CONF_LOCAL_GATEWAY_URL)
+            safe_gw: str | None = None
+            if raw_gw:
+                try:
+                    safe_gw = validate_gateway_url(raw_gw)
+                except ValueError:
+                    errors[CONF_LOCAL_GATEWAY_URL] = "invalid_gateway_url"
 
-                    if not data.get("isok"):
-                        errors["base"] = "invalid_auth"
-                    else:
-                        # Only allow one instance of this integration
-                        await self.async_set_unique_id(INTEGRATOR_TAG)
-                        self._abort_if_unique_id_configured()
+            if not errors:
+                # Validate credentials by trying to get JWT
+                try:
+                    session = async_get_clientsession(self.hass)
+                    async with session.post(
+                        API_GET_TOKEN,
+                        data={"itg": INTEGRATOR_TAG, "token": token},
+                    ) as response:
+                        data = await response.json()
 
-                        # Store token and gateway URL, proceed to consent step
-                        self._token = token
-                        self._gateway_url = user_input.get(CONF_LOCAL_GATEWAY_URL)
-                        return await self.async_step_consent()
+                        if not data.get("isok"):
+                            errors["base"] = "invalid_auth"
+                        else:
+                            # Only allow one instance of this integration
+                            await self.async_set_unique_id(INTEGRATOR_TAG)
+                            self._abort_if_unique_id_configured()
 
-            except aiohttp.ClientError:
-                errors["base"] = "cannot_connect"
-            except Exception:
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+                            # Store token + validated gateway URL + fresh
+                            # per-install webhook id, then proceed to consent.
+                            self._token = token
+                            self._gateway_url = safe_gw
+                            self._webhook_id = secrets.token_urlsafe(16)
+                            return await self.async_step_consent()
+
+                except aiohttp.ClientError:
+                    errors["base"] = "cannot_connect"
+                except Exception:
+                    _LOGGER.exception("Unexpected exception")
+                    errors["base"] = "unknown"
 
         return self.async_show_form(
             step_id="user",
@@ -105,7 +120,10 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             return self.async_create_entry(
                 title="Shelly Integrator",
-                data={CONF_INTEGRATOR_TOKEN: self._token},
+                data={
+                    CONF_INTEGRATOR_TOKEN: self._token,
+                    CONF_WEBHOOK_ID: self._webhook_id,
+                },
                 options=options,
             )
 
@@ -124,40 +142,58 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle reconfiguration of the integration."""
         errors: dict[str, str] = {}
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        # Reuse the entry's stored webhook id so the consent URL rendered
+        # here matches the endpoint the running integration listens on.
+        if entry:
+            self._webhook_id = entry.data.get(CONF_WEBHOOK_ID)
 
         if user_input is not None:
             token = user_input[CONF_INTEGRATOR_TOKEN]
 
-            # Validate token
-            try:
-                session = async_get_clientsession(self.hass)
-                async with session.post(
-                    API_GET_TOKEN,
-                    data={"itg": INTEGRATOR_TAG, "token": token},
-                ) as response:
-                    data = await response.json()
+            # Validate optional gateway URL first
+            raw_gw = user_input.get(CONF_LOCAL_GATEWAY_URL, "")
+            safe_gw = ""
+            if raw_gw:
+                try:
+                    safe_gw = validate_gateway_url(raw_gw)
+                except ValueError:
+                    errors[CONF_LOCAL_GATEWAY_URL] = "invalid_gateway_url"
 
-                    if not data.get("isok"):
-                        errors["base"] = "invalid_auth"
-                    else:
-                        # Update entry with new data
-                        new_data = {CONF_INTEGRATOR_TOKEN: token}
-                        new_options = {
-                            CONF_LOCAL_GATEWAY_URL: user_input.get(
-                                CONF_LOCAL_GATEWAY_URL, ""
-                            ),
-                        }
-                        self.hass.config_entries.async_update_entry(
-                            entry, data=new_data, options=new_options
-                        )
-                        await self.hass.config_entries.async_reload(entry.entry_id)
-                        return self.async_abort(reason="reconfigure_successful")
+            if not errors:
+                # Validate token
+                try:
+                    session = async_get_clientsession(self.hass)
+                    async with session.post(
+                        API_GET_TOKEN,
+                        data={"itg": INTEGRATOR_TAG, "token": token},
+                    ) as response:
+                        data = await response.json()
 
-            except aiohttp.ClientError:
-                errors["base"] = "cannot_connect"
-            except Exception:
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+                        if not data.get("isok"):
+                            errors["base"] = "invalid_auth"
+                        else:
+                            # Preserve the per-install webhook_id across
+                            # reconfigure — rotating it silently would
+                            # break the Shelly Cloud consent callback.
+                            existing_webhook_id = (
+                                entry.data.get(CONF_WEBHOOK_ID)
+                                if entry else None
+                            )
+                            new_data = {CONF_INTEGRATOR_TOKEN: token}
+                            if existing_webhook_id:
+                                new_data[CONF_WEBHOOK_ID] = existing_webhook_id
+                            new_options = {CONF_LOCAL_GATEWAY_URL: safe_gw}
+                            self.hass.config_entries.async_update_entry(
+                                entry, data=new_data, options=new_options
+                            )
+                            await self.hass.config_entries.async_reload(entry.entry_id)
+                            return self.async_abort(reason="reconfigure_successful")
+
+                except aiohttp.ClientError:
+                    errors["base"] = "cannot_connect"
+                except Exception:
+                    _LOGGER.exception("Unexpected exception")
+                    errors["base"] = "unknown"
 
         # Get current values
         current_token = entry.data.get(CONF_INTEGRATOR_TOKEN, "") if entry else ""
@@ -177,8 +213,8 @@ class ShellyIntegratorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _build_consent_url(self) -> str:
-        """Build the Shelly consent URL."""
-        return _safe_build_consent_url(self.hass)
+        """Build the Shelly consent URL using this flow's webhook id."""
+        return _safe_build_consent_url(self.hass, self._webhook_id)
 
 
 class ShellyIntegratorOptionsFlow(OptionsFlow):
@@ -191,9 +227,18 @@ class ShellyIntegratorOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Validate optional gateway URL
+            raw_gw = user_input.get(CONF_LOCAL_GATEWAY_URL, "")
+            safe_gw = ""
+            if raw_gw:
+                try:
+                    safe_gw = validate_gateway_url(raw_gw)
+                except ValueError:
+                    errors[CONF_LOCAL_GATEWAY_URL] = "invalid_gateway_url"
+
             # If token is provided, validate it
             new_token = user_input.get(CONF_INTEGRATOR_TOKEN)
-            if new_token:
+            if not errors and new_token:
                 try:
                     session = async_get_clientsession(self.hass)
                     async with session.post(
@@ -213,11 +258,9 @@ class ShellyIntegratorOptionsFlow(OptionsFlow):
                     self.hass.config_entries.async_update_entry(
                         self.config_entry, data=new_data
                     )
-                
-                # Save options (gateway URL)
-                options = {
-                    CONF_LOCAL_GATEWAY_URL: user_input.get(CONF_LOCAL_GATEWAY_URL, ""),
-                }
+
+                # Save options (validated gateway URL)
+                options = {CONF_LOCAL_GATEWAY_URL: safe_gw}
                 return self.async_create_entry(title="", data=options)
 
         # Build consent URL
@@ -243,15 +286,23 @@ class ShellyIntegratorOptionsFlow(OptionsFlow):
         )
 
     def _build_consent_url(self) -> str:
-        """Build the Shelly consent URL."""
-        return _safe_build_consent_url(self.hass)
+        """Build the Shelly consent URL using the entry's webhook id."""
+        webhook_id = self.config_entry.data.get(CONF_WEBHOOK_ID)
+        return _safe_build_consent_url(self.hass, webhook_id)
 
 
-def _safe_build_consent_url(hass) -> str:
-    """Build consent URL with fallback on error."""
+def _safe_build_consent_url(hass, webhook_id: str | None) -> str:
+    """Build consent URL with fallback on error.
+
+    ``webhook_id`` is the per-install randomised identifier. If missing
+    (e.g. a race during initial setup) we fall back to the generic
+    integrator landing page so the user still sees a useful link.
+    """
+    if not webhook_id:
+        return f"{SHELLY_CONSENT_URL}?itg={INTEGRATOR_TAG}"
     try:
         ha_url = get_url(hass, prefer_external=True)
-        return build_consent_url(INTEGRATOR_TAG, ha_url, WEBHOOK_ID)
+        return build_consent_url(INTEGRATOR_TAG, ha_url, webhook_id)
     except Exception as err:
         _LOGGER.warning("Could not build consent URL: %s", err)
         return f"{SHELLY_CONSENT_URL}?itg={INTEGRATOR_TAG}"
