@@ -1,6 +1,7 @@
 {
   "domain": "shelly_cloud_diy",
   "name": "Shelly Cloud DIY",
+  "after_dependencies": ["recorder"],
   "codeowners": ["@notDIRK"],
   "config_flow": true,
   "documentation": "https://github.com/notDIRK/shelly-cloud-diy-ha",
