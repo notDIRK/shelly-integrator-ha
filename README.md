@@ -20,9 +20,47 @@ Custom Home Assistant integration for Shelly devices using the **Cloud Integrato
 
 ## Requirements
 
-- Shelly Integrator API token
+- Shelly Integrator API token (see [Getting an API Token](#getting-an-api-token--api-token-beziehen) — this is gated by Shelly and not self-service)
 - Devices must be connected to Shelly Cloud
-- Home Assistant must be accessible externally (for webhook callback)
+- Home Assistant must be reachable from the public internet (Shelly Cloud needs to POST to the consent webhook). That usually means a port-forward or a reverse proxy on `https://your-ha.example.com`.
+
+## Getting an API Token / API-Token beziehen
+
+> ⚠️ Upfront reality check: the Shelly Cloud **Integrator API** used by this integration is not a self-service API. The [official Shelly Integrator API docs](https://shelly-api-docs.shelly.cloud/integrator-api/) state literally: *"Licenses for personal use are not provided."* There is **no button on `my.shelly.cloud`** where you can generate this token yourself — you have to request it from Shelly directly, and approval for hobby use is not guaranteed. See upstream issue [engesin/shelly-integrator-ha#1](https://github.com/engesin/shelly-integrator-ha/issues/1) for community context.
+
+### English
+
+1. Contact Shelly / Allterco Robotics and request a token for the **`ITG_OSS`** (open-source) integrator tag:
+   - E-mail **`support@allterco.com`**, **or**
+   - Fill out the partner form linked from the [official Integrator API docs](https://shelly-api-docs.shelly.cloud/integrator-api/).
+2. State clearly that you want to use the open-source `engesin/shelly-integrator-ha` integration (tag `ITG_OSS`) for Home Assistant and that you are a private user. Some users have been approved, others have been pointed to the Cloud Control API instead — your mileage may vary.
+3. If Shelly approves, you will receive the pair `(tag, token)`. This integration already hardcodes `tag = ITG_OSS`; you only need to paste the **`token`** (a long opaque string) into the HA config flow.
+4. Fallback if Shelly declines: Shelly recommends the [Cloud Control API](https://shelly-api-docs.shelly.cloud/cloud-control-api/) (OAuth, per-user) for private use — **this integration does not speak that API**. You would then need a different community integration or build your own.
+
+Once you have the token:
+
+1. Home Assistant → **Settings → Devices & Services → Add Integration → "Shelly Integrator"**
+2. Paste the token into the **API Token** field.
+3. Continue with the consent step (see [Setup](#setup) below).
+
+The token is stored in HA's config entry (plaintext at rest — standard HA practice). It grants broad control of every device your Shelly account shares with the integrator — treat it like a password, and never commit it to git.
+
+### Deutsch
+
+1. Shelly / Allterco Robotics direkt kontaktieren und einen Token für das **`ITG_OSS`**-Integrator-Tag (Open Source) anfragen:
+   - E-Mail an **`support@allterco.com`**, **oder**
+   - Partner-Formular aus den [offiziellen Integrator-API-Docs](https://shelly-api-docs.shelly.cloud/integrator-api/) ausfüllen.
+2. In der Anfrage klar schreiben, dass du die Open-Source-Integration `engesin/shelly-integrator-ha` (Tag `ITG_OSS`) mit Home Assistant nutzen möchtest und Privatanwender bist. Einige User haben einen Token bekommen, andere wurden auf die Cloud Control API verwiesen — eine Zusage ist offiziell nicht garantiert (die Shelly-Docs sagen: *"Licenses for personal use are not provided."*).
+3. Wenn Shelly zustimmt, bekommst du ein Paar `(tag, token)`. Diese Integration hat `tag = ITG_OSS` bereits fest verdrahtet; du brauchst nur den **`token`** (ein langer undurchsichtiger String), den du im HA-Konfigurations-Dialog einfügst.
+4. Falls Shelly ablehnt: Shelly empfiehlt für Privatnutzung die [Cloud Control API](https://shelly-api-docs.shelly.cloud/cloud-control-api/) (OAuth, pro Nutzer) — **diese Integration spricht diese API nicht**. Du bräuchtest dann eine andere Community-Integration oder müsstest selbst eine bauen.
+
+Sobald der Token da ist:
+
+1. Home Assistant → **Einstellungen → Geräte & Dienste → Integration hinzufügen → "Shelly Integrator"**.
+2. Token in das Feld **API Token** einfügen.
+3. Weiter mit dem Consent-Schritt (siehe [Setup](#setup) unten).
+
+Der Token landet im HA-Config-Entry (Klartext auf Disk — HA-Standard). Er gibt weitreichende Kontrolle über alle Geräte, die dein Shelly-Account mit dem Integrator teilt — behandle ihn wie ein Passwort und commite ihn niemals in git.
 
 ## Installation
 
