@@ -11,12 +11,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, is_gen2_status
+from .const import DOMAIN, device_gen, is_gen2_status
 from .coordinator import ShellyCloudCoordinator, SIGNAL_NEW_DEVICE
 from .entities.base import ShellyBaseEntity
 from .entities.descriptions import (
+    BLE_BINARY_SENSORS,
     BLOCK_BINARY_SENSORS,
     RPC_BINARY_SENSORS,
+    BleBinarySensorDescription,
     BlockBinarySensorDescription,
     RpcBinarySensorDescription,
 )
@@ -42,7 +44,12 @@ async def async_setup_entry(
         if not status:
             return entities
 
-        if is_gen2_status(status):
+        gen = device_gen(status)
+        if gen == "GBLE":
+            entities.extend(_create_ble_binary_sensors(
+                device_id, status, created_entities, coordinator
+            ))
+        elif is_gen2_status(status):
             entities.extend(_create_rpc_sensors(
                 device_id, status, created_entities, coordinator
             ))
@@ -174,6 +181,99 @@ def _create_rpc_sensors(
                 ))
 
     return entities
+
+
+def _create_ble_binary_sensors(
+    device_id: str,
+    status: dict[str, Any],
+    created: set[str],
+    coordinator: ShellyCloudCoordinator,
+) -> list[BinarySensorEntity]:
+    """Create binary sensors for BLE / Shelly-BLU-Gateway-bridged devices.
+
+    Mirrors ``_create_ble_sensors`` in ``sensor.py``: iterate every
+    ``<type>:<channel>`` status key and look up the BLE_BINARY_SENSORS
+    table. Unknown types are skipped so we do not invent entities that
+    will always be ``unknown``.
+    """
+    entities: list[BinarySensorEntity] = []
+
+    for key, payload in status.items():
+        if not isinstance(payload, dict):
+            continue
+        if ":" not in key:
+            continue
+        sensor_type, _, channel_s = key.partition(":")
+        if not channel_s.isdigit():
+            continue
+        channel = int(channel_s)
+
+        desc = BLE_BINARY_SENSORS.get(sensor_type)
+        if desc is None:
+            continue
+        if desc.value_field not in payload:
+            continue
+
+        uid = f"{device_id}_ble_{sensor_type}_{channel}"
+        if uid in created:
+            continue
+        created.add(uid)
+        entities.append(
+            BleBinarySensor(
+                coordinator=coordinator,
+                device_id=device_id,
+                description=desc,
+                sensor_type=sensor_type,
+                channel=channel,
+            )
+        )
+
+    return entities
+
+
+class BleBinarySensor(ShellyBaseEntity, BinarySensorEntity):
+    """BLE / Shelly-BLU-Gateway-bridged binary sensor.
+
+    Reads ``<sensor_type>:<channel>``-shaped status keys (e.g.
+    ``moisture_alarm:0``) and interprets the ``value_field`` payload as
+    a boolean.
+    """
+
+    def __init__(
+        self,
+        *,
+        coordinator: ShellyCloudCoordinator,
+        device_id: str,
+        description: BleBinarySensorDescription,
+        sensor_type: str,
+        channel: int,
+    ) -> None:
+        super().__init__(coordinator, device_id, channel)
+        self._description = description
+        self._sensor_type = sensor_type
+        self._status_key = f"{sensor_type}:{channel}"
+
+        self._attr_unique_id = f"{device_id}_ble_{sensor_type}_{channel}"
+        base_name = description.name
+        self._attr_name = base_name if channel == 0 else f"{base_name} {channel + 1}"
+
+        if description.device_class:
+            self._attr_device_class = description.device_class
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return true if the BLE binary sensor is tripped."""
+        payload = self.device_status.get(self._status_key)
+        if not isinstance(payload, dict):
+            return None
+        value = payload.get(self._description.value_field)
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value > 0
+        return None
 
 
 class BlockBinarySensor(ShellyBaseEntity, BinarySensorEntity):
