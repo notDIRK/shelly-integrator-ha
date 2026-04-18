@@ -104,6 +104,30 @@ Nicht-Ziele in M1:
   Local-Gateway-Pfad bleibt; Cloud-Historie ist separater Spät-Scope,
   sofern machbar).
 
+M1-Folge-Releases (alles innerhalb des `auth_key`-HTTP-Polling-Modells,
+ohne OAuth):
+- **v0.3.2** ✅ — Gen2/Gen3-Modellerkennung (`code` + `cloud.connected`
+  aus dem Top-Level von `/device/all_status` lesen, nicht nur aus
+  `_dev_info`).
+- **v0.3.3** ⏳ — User-gesetzte Gerätenamen per Cloud Control API v2:
+  `POST /v2/devices/api/get` mit
+  `{auth_key, ids, select:["settings"], pick:{settings:["sys"]}}` liefert
+  `settings.sys.device.name` (Gen2) / `settings.name` (Gen1). Lazy,
+  batched, nur für Online-Geräte, teilt sich das 1-req/s-Budget mit dem
+  Haupt-Poll. Das ist der *geräte-lokale* Name (via Shelly-App / LAN-RPC
+  gesetzt); in der Praxis fast immer identisch mit dem Shelly-Cloud-Label,
+  aber nicht garantiert.
+- **v0.4.0** ⏳ — Opt-In-Anlage von Entities pro Gerät (siehe unten).
+
+Opt-In-Entity-Anlage (v0.4.0):
+- Das Default-Anlegen aller Entities aller gefundenen Geräte ist
+  unfreundlich für User, die bereits die HA-Core-Shelly-Integration
+  über LAN laufen haben — sie bekommen Duplikate. v0.4.0 ergänzt den
+  Config-Flow um einen Device-Picker (mit "alle gleich anlegen"-Option
+  für Greenfield-User) und einen Options-Flow-Schalter zum späteren
+  Aktivieren/Deaktivieren. Der Coordinator pollt weiter die ganze Flotte
+  (ein Request), aber Entities werden nur für aktivierte Geräte erzeugt.
+
 Ausdrücklich dokumentierte Einschränkungen, die User kennen müssen:
 - **1 Request pro Sekunde** Rate-Limit pro Shelly-Account (Shelly-Offizial-Doku).
 - **Polling-Latenz** von 5 s (Default) bedeutet: Sensor-Werte hinken der

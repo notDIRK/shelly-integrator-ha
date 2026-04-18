@@ -93,6 +93,28 @@ Non-goals in M1:
 - Cloud-sourced historical energy data (the existing local-gateway path is
   preserved; cloud historical is a separate later scope if feasible).
 
+M1 point-release follow-ups (all within the `auth_key` HTTP-polling model,
+no OAuth needed):
+- **v0.3.2** ✅ — Gen2/Gen3 device model detection (read `code` + `cloud.connected`
+  from the top level of `/device/all_status`, not just from `_dev_info`).
+- **v0.3.3** ⏳ — User-set device name backfill via the Cloud Control API v2
+  endpoint `POST /v2/devices/api/get` with
+  `{auth_key, ids, select:["settings"], pick:{settings:["sys"]}}` — returns
+  `settings.sys.device.name` (Gen2) / `settings.name` (Gen1). Lazy, batched,
+  online-only, shares the 1 req/s budget with the main poll. This is the
+  *device-local* name (set via the Shelly app / LAN RPC); in practice
+  identical to the user-visible cloud label but not guaranteed.
+- **v0.4.0** ⏳ — Opt-in per-device entity creation (see below).
+
+Opt-in entity creation (v0.4.0):
+- Default auto-creation of every discovered device's entities is unfriendly
+  for users who already run the HA Core Shelly integration over LAN — they
+  get duplicate entities. v0.4.0 adds a device-picker step to the config
+  flow (with a "create everything now" shortcut for greenfield users) and
+  an options-flow toggle for enabling/disabling devices later. The
+  coordinator still polls the whole fleet (single request), but entities
+  are only materialised for enabled devices.
+
 Explicitly documented limitations users must know:
 - **1 request per second** rate limit per Shelly account (Shelly official
   doc).
