@@ -5,109 +5,93 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/v/release/notDIRK/shelly-cloud-diy-ha)](https://github.com/notDIRK/shelly-cloud-diy-ha/releases)
 
-> 🚧 **Status: active pivot in progress.** There is **no stable release yet** for this new direction. The `v0.2.x` tags in this repo are the legacy **Integrator API** implementation (inherited from the engesin upstream); `v0.3.0+` will be the first release built on the **Cloud Control API**. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for milestones.
->
-> 🚧 **Status: Aktuell in der Pivot-Phase.** Es gibt **noch kein Stable-Release** für die neue Richtung. Die `v0.2.x`-Tags in diesem Repo sind die Legacy-**Integrator-API-Implementierung** (geerbt vom engesin-Upstream); `v0.3.0+` wird das erste Release auf Basis der **Cloud Control API**. Meilensteine in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> 🇩🇪 **Deutsch:** Eine deutschsprachige Version dieses Dokuments findest du in [`README.de.md`](README.de.md).
+
+> 🚧 **Status: active pivot in progress.** No stable release for this new direction yet. The `v0.2.x` tags are the legacy **Integrator API** implementation inherited from the engesin upstream; `v0.3.0+` will be the first release built on the **Cloud Control API**. Milestones: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ---
 
-## What this is · Was das ist
+## Why this fork exists — and the gap it closes
 
-**English** — A Home Assistant custom integration that connects your HA instance to the Shelly Cloud using the **self-service Cloud Control API path**. You paste an `auth_key` from the Shelly App and your devices — including devices shared with you by other Shelly users — show up as entities in HA. Supports Shelly Gen1, Gen2/Gen3, and BLE-bridged devices (Shelly BLU family, gateway-reported third-party BLE sensors).
+Shelly Cloud exposes **two** cloud APIs:
 
-**Deutsch** — Eine Home-Assistant-Custom-Integration, die deine HA-Instanz über den **Self-Service-Pfad der Cloud Control API** an die Shelly Cloud anbindet. Du kopierst einen `auth_key` aus der Shelly-App, und deine Geräte — inklusive solcher, die andere Shelly-User mit dir geteilt haben — erscheinen als Entities in HA. Unterstützt Shelly Gen1, Gen2/Gen3 und BLE-überbrückte Geräte (Shelly-BLU-Familie, Gateway-gemeldete BLE-Fremdsensoren).
+1. The **Integrator API** (`ITG_OSS` tag), which the popular community integration [`engesin/shelly-integrator-ha`](https://github.com/engesin/shelly-integrator-ha) uses. Shelly's own docs state: *"Licenses for personal use are not provided."* ([source](https://shelly-api-docs.shelly.cloud/integrator-api/)). Private users typically get stuck at the "email Shelly and wait for approval" step — see upstream [issue #1](https://github.com/engesin/shelly-integrator-ha/issues/1).
+2. The **Cloud Control API**, which is **self-service**: the user generates an `auth_key` directly in the Shelly App under *User settings → Authorization cloud key*. No approval process, no waiting, available to any Shelly Cloud account holder.
 
----
+The Cloud Control API **can see devices shared into the user's account by other Shelly users** (verified empirically against a real ECOWITT WS90 weather station shared from another account). The Integrator API's consent flow cannot do that because consent is granted per-owner — a device you were only *shared* doesn't belong to you and was never granted by the owner to any integrator. The official Home Assistant Shelly integration, meanwhile, is LAN-only and doesn't reach remote or shared devices at all.
 
-## Why this exists · Warum das Projekt existiert
-
-**English** — Shelly publishes two cloud APIs: an **Integrator API** meant for commercial integrators (explicitly *"Licenses for personal use are not provided."* per [Shelly's own docs](https://shelly-api-docs.shelly.cloud/integrator-api/)) and a **Cloud Control API** available to any Shelly user with an account. The popular existing community integration [`engesin/shelly-integrator-ha`](https://github.com/engesin/shelly-integrator-ha) uses the Integrator API, so private users tend to get stuck at the "contact Shelly support" step (see [upstream issue #1](https://github.com/engesin/shelly-integrator-ha/issues/1)). The Cloud Control API has a self-service key available directly in the Shelly App — but no maintained HA integration takes the full advantage of it. This project fills that gap.
-
-**Deutsch** — Shelly veröffentlicht zwei Cloud-APIs: eine **Integrator API** für kommerzielle Integratoren (explizit *"Licenses for personal use are not provided."* laut [Shelly-Docs](https://shelly-api-docs.shelly.cloud/integrator-api/)) und eine **Cloud Control API**, die für jeden Shelly-Account verfügbar ist. Die verbreitete Community-Integration [`engesin/shelly-integrator-ha`](https://github.com/engesin/shelly-integrator-ha) nutzt die Integrator API, weswegen Privatanwender meistens am „Shelly-Support anschreiben"-Schritt scheitern (siehe [Upstream-Issue #1](https://github.com/engesin/shelly-integrator-ha/issues/1)). Die Cloud Control API hat einen Self-Service-Key direkt in der Shelly-App — aber keine gepflegte HA-Integration nutzt das voll. Dieses Projekt schließt diese Lücke.
-
----
-
-## Differentiation · Abgrenzung
+### Comparison with existing projects
 
 | Project | Auth | Realtime | Shared devices | Maintained |
 |---|---|---|---|---|
 | **`shelly-cloud-diy-ha`** *(this repo)* | `auth_key` (M1) / OAuth (M2) | HTTP poll 5 s (M1) → WebSocket push (M2) | ✅ | 🔄 active |
 | [`engesin/shelly-integrator-ha`](https://github.com/engesin/shelly-integrator-ha) | Integrator API token *(gated — no private-use licences)* | WebSocket push | ❌ | ✅ |
 | [HA Core — official Shelly integration](https://www.home-assistant.io/integrations/shelly/) | Local LAN / mDNS | LAN push | ❌ *(remote / shared devices unreachable over LAN)* | ✅ |
-| [`StyraHem/ShellyForHASS`](https://github.com/StyraHem/ShellyForHASS) | Local LAN | LAN push | ❌ | ❌ **discontinued** per upstream README |
+| [`StyraHem/ShellyForHASS`](https://github.com/StyraHem/ShellyForHASS) | Local LAN | LAN push | ❌ | ❌ **discontinued** per its README |
 | [`vincenzosuraci/hassio_shelly_cloud`](https://github.com/vincenzosuraci/hassio_shelly_cloud) | Username/password *(reverse-engineered)* | HTTP polling | ? | ❌ last push 2019 |
-| [HA YAML Blueprint (2025)](https://community.home-assistant.io/t/controlling-shelly-cloud-devices-in-home-assistant/928462) | `auth_key` | ❌ command-only, no state read | ? | ✅ |
+| [HA YAML Blueprint (2025)](https://community.home-assistant.io/t/controlling-shelly-cloud-devices-in-home-assistant/928462) | `auth_key` | ❌ command-only, **no state read** | ? | ✅ |
 | [`corenting/poc_shelly_cloud_control_api_ws`](https://github.com/corenting/poc_shelly_cloud_control_api_ws) | OAuth | WebSocket | ? | POC, not an integration |
 
-**English** — Today there is **no maintained HA integration that combines Cloud-Control-API-based state reading, shared-device support, and BLE/gateway coverage in one package**. That gap is what `shelly-cloud-diy-ha` exists to fill.
-
-**Deutsch** — Aktuell gibt es **keine gepflegte HA-Integration, die Cloud-Control-API-basiertes State-Lesen, Shared-Device-Support und BLE-/Gateway-Abdeckung in einem Paket vereint**. Genau diese Lücke füllt `shelly-cloud-diy-ha`.
+No other maintained Home Assistant integration currently combines **Cloud Control API access**, **state reading**, **shared-device support**, and **Gen1 / Gen2 / BLE-gateway coverage** in one package. That is the gap this fork was made to close.
 
 ---
 
-## Requirements · Voraussetzungen
+## What the integration does
 
-**English**:
-- A Shelly Cloud account and at least one device paired to it
-- Home Assistant 2024.1 or newer
-- Reachable-from-HA outbound HTTPS to the Shelly Cloud (standard)
-- **No** need for Home Assistant to be externally reachable from the internet (the Cloud Control API is request/response from HA outbound — no inbound webhook required for M1)
+A Home Assistant custom integration that:
 
-**Deutsch**:
-- Ein Shelly-Cloud-Account mit mindestens einem verknüpften Gerät
-- Home Assistant 2024.1 oder neuer
-- Ausgehendes HTTPS von HA zur Shelly-Cloud erreichbar (Standard)
-- **Kein** externer Internet-Zugang auf die HA-Instanz nötig (die Cloud Control API ist Request/Response von HA raus — kein Inbound-Webhook erforderlich in M1)
+- Connects to the Shelly Cloud using the self-service Cloud Control API path.
+- Reads device state for **every device visible to your Shelly Cloud account**, including devices that have been shared with you and including BLE-bridged devices reported through a Shelly BLU Gateway.
+- Exposes those devices as Home Assistant entities — switches, lights, covers, sensors, binary sensors, buttons.
+- Does not require Home Assistant to be exposed to the public internet (no inbound webhook in Milestone 1).
+- Works alongside Shelly Cloud and the Shelly App — it does not take over or lock out other clients.
 
 ---
 
-## Getting your credentials · Credentials besorgen
+## Requirements
 
-**English** — This is truly self-service, unlike the Integrator API:
+- A Shelly Cloud account with at least one device paired to it.
+- Home Assistant **2024.1** or newer.
+- Outbound HTTPS reachability from Home Assistant to `*.shelly.cloud` (standard).
+- No inbound internet reachability needed on the Home Assistant side (Milestone 1).
+
+---
+
+## Getting your credentials
+
+The Cloud Control API is self-service. You do not need to contact Shelly, file a form, or wait for approval.
 
 1. Open the **Shelly App**.
-2. Go to **User settings** → **Authorization cloud key**.
+2. Go to **User settings → Authorization cloud key**.
 3. Tap **GET KEY**.
-4. You get two values: an **`auth_key`** (long opaque string) and a **server URI** (something like `shelly-42-eu.shelly.cloud`).
-5. Both values are what you paste into the HA config flow. That's it — no email to Shelly, no waiting, no approval process.
+4. You receive two values: an **`auth_key`** (a long opaque string) and a **server URI** (e.g. `shelly-42-eu.shelly.cloud`).
+5. Both values are pasted into the Home Assistant config flow during setup.
 
-**Deutsch** — Das ist tatsächlich Self-Service, anders als bei der Integrator API:
-
-1. **Shelly-App** öffnen.
-2. Zu **Benutzereinstellungen** → **Authorization cloud key** gehen.
-3. Auf **GET KEY** tippen.
-4. Du bekommst zwei Werte: einen **`auth_key`** (langer undurchsichtiger String) und eine **Server-URI** (etwa `shelly-42-eu.shelly.cloud`).
-5. Beides kopierst du im HA-Konfigurations-Dialog ein. Fertig — keine E-Mail an Shelly, kein Warten, kein Freigabeprozess.
-
-> 🔐 **Security note · Sicherheitshinweis** — The `auth_key` grants control of every device your Shelly account can see (including shared ones). Treat it like a password. Rotation: change your Shelly password in the App → the key invalidates server-side and a new one appears.
->
-> Der `auth_key` gibt Kontrolle über jedes Gerät, das dein Shelly-Account sieht (inklusive geteilter). Behandle ihn wie ein Passwort. Rotation: Shelly-Passwort in der App ändern → Key wird serverseitig invalidiert und ein neuer taucht auf.
+> 🔐 **Security** — The `auth_key` grants control of every device visible to your Shelly Cloud account (including devices shared with you). Treat it like a password. To rotate: change your Shelly account password in the App — the old key invalidates server-side and a new one is generated.
 
 ---
 
-## Rate limits and latency · Rate-Limits und Latenz
+## Rate limits and latency (open communication)
 
-Shelly documents a rate limit of **1 API request per second per account** ([source](https://shelly-api-docs.shelly.cloud/cloud-control-api/)).
+Shelly documents a rate limit of **1 API request per second per account** ([source](https://shelly-api-docs.shelly.cloud/cloud-control-api/)). The integration respects this budget by consolidating state fetches into a single `POST /device/all_status` call per poll cycle — one request returns the full state of every device visible to the account.
 
 | | Milestone 1 (current scope) | Milestone 2 (future) |
 |---|---|---|
-| Mechanism | HTTP polling | WebSocket push |
-| State-update latency (p50 / p99) | ~2.5 s / ~5 s | < 100 ms / < 500 ms |
-| Outbound traffic (50-device account) | ≈ 12 KB/s avg at 5 s poll | 0 bytes steady |
-| Commands (switch on/off, dim, …) | immediate HTTP POST | via WebSocket |
-| Credential required | `auth_key` only | Shelly email + password (OAuth) |
+| Transport | HTTP polling | WebSocket push |
+| Default state-update latency (p50 / p99) | ~2.5 s / ~5 s | < 100 ms / < 500 ms |
+| Outbound traffic (≈ 50-device account) | ≈ 12 KB/s avg at 5 s poll interval | 0 bytes steady |
+| Commands (switch, dim, cover) | immediate HTTP POST, independent of poll timing | via WebSocket |
+| Credentials required | `auth_key` + server URI | Shelly email + password (OAuth2 with `client_id=shelly-diy`) |
 
-**English** — The 5-second poll default is chosen to stay well under Shelly's 1-req/s budget while leaving command headroom. Sensor and weather-station values feel live enough; switch feedback feels "gentle". Milestone 2 will close that gap.
+The 5-second poll default is chosen to stay well under the 1 req/s budget while leaving command headroom. Sensor values (temperature, energy, weather data) feel live; switch feedback in the UI feels gentle — Milestone 2's WebSocket push closes that gap. Users can tune the poll interval between 3 s (24 KB/s at 58 devices) and 60 s via the options flow.
 
-**Deutsch** — Das 5-Sekunden-Poll-Default ist so gewählt, dass wir deutlich unter Shellys 1-req/s-Budget bleiben und Command-Reserve behalten. Sensor- und Wetterstations-Werte fühlen sich „live genug" an; Schalt-Feedback fühlt sich „gemütlich" an. Meilenstein 2 schließt genau diese Lücke.
+Shelly also notes that the HTTP endpoints are *intentionally only lightly documented* and that parameter formats may change. The integration pins to the v1 endpoint shape and will react to changes if and when they occur — but this is a real long-term risk that you should be aware of.
 
 ---
 
-## Installation (via HACS custom repository) · Installation (via HACS-Custom-Repository)
+## Installation (HACS custom repository)
 
-> Currently available as a custom repository only. HACS-default-store submission is planned (Milestone 3).
->
-> Aktuell nur als Custom Repository verfügbar. HACS-Default-Store-Aufnahme ist geplant (Meilenstein 3).
+> The integration will be submitted to the HACS default store after Milestone 1 stabilises. Until then, add it as a custom repository:
 
 1. Open **HACS** in Home Assistant.
 2. Click the three-dots menu → **Custom repositories**.
@@ -121,32 +105,31 @@ Shelly documents a rate limit of **1 API request per second per account** ([sour
 
 ## Setup
 
-1. Home Assistant → **Settings → Devices & Services → Add Integration → "Shelly Cloud DIY"**
+1. Home Assistant → **Settings → Devices & Services → Add Integration → "Shelly Cloud DIY"**.
 2. Paste your `auth_key`.
 3. Paste your `server URI` (e.g. `shelly-42-eu.shelly.cloud`).
-4. Click **Submit**. Devices are fetched immediately.
-
-*Same steps, German labels:* **Einstellungen → Geräte & Dienste → Integration hinzufügen → "Shelly Cloud DIY"**, `auth_key` + Server-URI einfügen, **Absenden**.
+4. Click **Submit**. Devices are fetched immediately and appear as entities.
 
 ---
 
-## Roadmap
+## Roadmap summary
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full bilingual plan with milestone scopes, non-goals, and effort framing.
+Full plan with per-milestone scope, non-goals, and limitations: [`docs/ROADMAP.md`](docs/ROADMAP.md) · German: [`docs/ROADMAP.de.md`](docs/ROADMAP.de.md).
 
-**TL;DR:**
-- ✅ **M0 Foundation** — fork, security hardening, pivot research, repo rename
-- 🔄 **M1 Cloud Control API + auth_key + HTTP polling** — *next, first HACS release*
+- ✅ **M0 Foundation** — fork, security hardening, pivot research and verification, repo rename, CLOUD DIY branding
+- 🔄 **M1 Cloud Control API + `auth_key` + HTTP polling** — first HACS release target
 - ⏳ **M2 OAuth + WebSocket realtime** — push-based sub-second updates
-- 💡 **M3 HACS default-store submission** — logo PR to `home-assistant/brands`, clean release
-- 💡 **M4 HA-Core-quality polish** — diagnostics, repairs, full test coverage
+- 💡 **M3 HACS default-store submission** — logo PR to `home-assistant/brands`, clean stable release
+- 💡 **M4 HA Core quality-scale polish** — diagnostics, repairs, test coverage
 
 ---
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [`LICENSE`](LICENSE).
 
-Forked from [`engesin/shelly-integrator-ha`](https://github.com/engesin/shelly-integrator-ha) (Integrator API implementation) — fork lineage retained for git-history traceability only; no upstream merges are expected since the project pivoted API.
+---
 
-Geforkt von [`engesin/shelly-integrator-ha`](https://github.com/engesin/shelly-integrator-ha) (Integrator-API-Implementierung) — Fork-Beziehung ist nur für Git-History-Nachvollziehbarkeit erhalten; keine Upstream-Merges mehr zu erwarten, seit das Projekt die API gewechselt hat.
+## Fork lineage
+
+Forked from [`engesin/shelly-integrator-ha`](https://github.com/engesin/shelly-integrator-ha) (Integrator API implementation). The fork relationship is retained for git-history traceability only; the project has pivoted to a different API, and no upstream merges are expected.
