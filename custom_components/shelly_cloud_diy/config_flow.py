@@ -241,20 +241,14 @@ class ShellyCloudDiyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Single form: bulk action radio + per-device multi-select list.
 
-        The form has two widgets on one screen:
-
-        - ``bulk_action`` — three hard-coded radio choices ("Manuelle
-          Auswahl unten", "Alle anhaken", "Alle abwählen"). Labels
-          are passed inline in the SelectSelector config so they do
-          not depend on i18n wiring.
-        - ``enabled_devices`` — the familiar multi-select list,
-          pre-ticked with every device.
-
-        On submit, the bulk action overrides the list: "Alle anhaken"
-        stores every id, "Alle abwählen" stores an empty list, and
-        "Manuell" takes whatever the user ticked. This keeps a single
-        screen where the user can click an action *or* fine-tune
-        individual devices.
+        UX: the user can either tick/untick individual devices in the
+        list and submit, or use the bulk action radio as a shortcut.
+        Picking "Alle Geräte anhaken" or "Alle Geräte abwählen" and
+        clicking *Submit* **re-renders** the form with the list
+        live-updated (all ticked or all unticked) and the radio reset
+        to "Manuelle Auswahl". The user then verifies / fine-tunes
+        and clicks Submit a second time to actually save — only the
+        "Manuelle Auswahl" submit persists the entry.
         """
         options = _build_device_options(
             self._pending_devices, self._pending_names
@@ -263,15 +257,17 @@ class ShellyCloudDiyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             action = user_input.get("bulk_action", "manual")
+
             if action == "all":
-                selected = all_ids
-            elif action == "none":
-                selected = []
-            else:
-                raw = user_input.get(CONF_ENABLED_DEVICES) or []
-                if not isinstance(raw, list):
-                    raw = [raw]
-                selected = [d for d in raw if isinstance(d, str)]
+                return self._show_devices_form(options, all_ids, default_enabled=all_ids)
+            if action == "none":
+                return self._show_devices_form(options, all_ids, default_enabled=[])
+
+            # action == "manual" → persist whatever is currently ticked
+            raw = user_input.get(CONF_ENABLED_DEVICES) or []
+            if not isinstance(raw, list):
+                raw = [raw]
+            selected = [d for d in raw if isinstance(d, str)]
 
             create_all = set(selected) == set(all_ids) and len(all_ids) > 0
 
@@ -285,6 +281,16 @@ class ShellyCloudDiyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 options=entry_options,
             )
 
+        # Initial render — every device pre-ticked.
+        return self._show_devices_form(options, all_ids, default_enabled=all_ids)
+
+    def _show_devices_form(
+        self,
+        options: list[SelectOptionDict],
+        all_ids: list[str],
+        default_enabled: list[str],
+    ) -> FlowResult:
+        """Render the device-picker form with the given default ticks."""
         schema = vol.Schema(
             {
                 vol.Required(
@@ -294,22 +300,22 @@ class ShellyCloudDiyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         options=[
                             SelectOptionDict(
                                 value="manual",
-                                label="Manuelle Auswahl (unten bearbeiten)",
+                                label="Manuelle Auswahl — Submit speichert die Liste unten",
                             ),
                             SelectOptionDict(
                                 value="all",
-                                label="Alle Geräte anhaken",
+                                label="Alle Geräte anhaken (Submit aktualisiert die Liste — noch nicht speichern)",
                             ),
                             SelectOptionDict(
                                 value="none",
-                                label="Alle Geräte abwählen",
+                                label="Alle Geräte abwählen (Submit aktualisiert die Liste — noch nicht speichern)",
                             ),
                         ],
                         mode=SelectSelectorMode.LIST,
                     )
                 ),
                 vol.Optional(
-                    CONF_ENABLED_DEVICES, default=all_ids
+                    CONF_ENABLED_DEVICES, default=default_enabled
                 ): SelectSelector(
                     SelectSelectorConfig(
                         options=options,
@@ -319,7 +325,6 @@ class ShellyCloudDiyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
             }
         )
-
         return self.async_show_form(
             step_id="devices",
             data_schema=schema,
@@ -464,15 +469,16 @@ class ShellyCloudDiyOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             action = user_input.get("bulk_action", "manual")
+
             if action == "all":
-                selected = all_ids
-            elif action == "none":
-                selected = []
-            else:
-                raw = user_input.get(CONF_ENABLED_DEVICES) or []
-                if not isinstance(raw, list):
-                    raw = [raw]
-                selected = [d for d in raw if isinstance(d, str)]
+                return self._show_devices_form(options, all_ids, default_enabled=all_ids)
+            if action == "none":
+                return self._show_devices_form(options, all_ids, default_enabled=[])
+
+            raw = user_input.get(CONF_ENABLED_DEVICES) or []
+            if not isinstance(raw, list):
+                raw = [raw]
+            selected = [d for d in raw if isinstance(d, str)]
 
             create_all = set(selected) == set(all_ids) and len(all_ids) > 0
 
@@ -494,6 +500,15 @@ class ShellyCloudDiyOptionsFlow(OptionsFlow):
                 # pre-ticked instead of empty.
                 default_enabled = all_ids
 
+        return self._show_devices_form(options, all_ids, default_enabled=default_enabled)
+
+    def _show_devices_form(
+        self,
+        options: list[SelectOptionDict],
+        all_ids: list[str],
+        default_enabled: list[str],
+    ) -> FlowResult:
+        """Render the device-picker form with the given default ticks."""
         schema = vol.Schema(
             {
                 vol.Required(
@@ -503,15 +518,15 @@ class ShellyCloudDiyOptionsFlow(OptionsFlow):
                         options=[
                             SelectOptionDict(
                                 value="manual",
-                                label="Manuelle Auswahl (unten bearbeiten)",
+                                label="Manuelle Auswahl — Submit speichert die Liste unten",
                             ),
                             SelectOptionDict(
                                 value="all",
-                                label="Alle Geräte anhaken",
+                                label="Alle Geräte anhaken (Submit aktualisiert die Liste — noch nicht speichern)",
                             ),
                             SelectOptionDict(
                                 value="none",
-                                label="Alle Geräte abwählen",
+                                label="Alle Geräte abwählen (Submit aktualisiert die Liste — noch nicht speichern)",
                             ),
                         ],
                         mode=SelectSelectorMode.LIST,
