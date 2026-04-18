@@ -19,21 +19,14 @@
       },
       "devices": {
         "title": "Choose devices to expose",
-        "description": "The Shelly Cloud account exposes {total} device(s). Pick how to populate Home Assistant:",
-        "menu_options": {
-          "devices_all": "Enable every device (recommended for most users — future devices are auto-enabled too)",
-          "devices_none": "Disable every device (polling still runs, but no entities are created)",
-          "devices_select": "Choose individually (opens a list pre-ticked with every device so you can untick the ones you want to exclude)"
-        }
-      },
-      "devices_select": {
-        "title": "Choose devices individually",
-        "description": "{total} device(s) pre-ticked — untick any you want to exclude. Offline devices are marked with ⚠.",
+        "description": "The Shelly Cloud account exposes {total} device(s). Pick a bulk action above, or adjust the list below directly. If every device is ticked on save, future devices added to the Shelly account will be auto-enabled too. Offline devices are marked with ⚠.",
         "data": {
-          "enabled_devices": "Devices to expose as entities"
+          "bulk_action": "Bulk action",
+          "enabled_devices": "Devices (tick/untick individually)"
         },
         "data_description": {
-          "enabled_devices": "Leaving every device ticked keeps future-device auto-enable on; unticking any device makes the selection explicit."
+          "bulk_action": "\"Tick all\" or \"Untick all\" overrides the manual list below on save. Pick \"Manual selection\" to keep the list as-is.",
+          "enabled_devices": "Only ticked devices produce Home Assistant entities."
         }
       },
       "reauth_confirm": {
@@ -73,22 +66,14 @@
       },
       "devices": {
         "title": "Change device selection",
-        "description": "The Shelly Cloud account exposes {total} device(s). Pick how to update the selection:",
-        "menu_options": {
-          "devices_keep": "Keep current selection (cancel — nothing changes)",
-          "devices_all": "Enable every device (future devices auto-enabled)",
-          "devices_none": "Disable every device",
-          "devices_select": "Edit individually (opens a pre-ticked list)"
-        }
-      },
-      "devices_select": {
-        "title": "Edit device selection",
-        "description": "{total} device(s). Untick the ones you want to exclude.",
+        "description": "The Shelly Cloud account exposes {total} device(s). Pick a bulk action above, or adjust the list below directly. If every device is ticked on save, future devices will be auto-enabled too.",
         "data": {
-          "enabled_devices": "Devices to expose as entities"
+          "bulk_action": "Bulk action",
+          "enabled_devices": "Devices (tick/untick individually)"
         },
         "data_description": {
-          "enabled_devices": "Leaving every device ticked keeps future-device auto-enable on; unticking any device makes the selection explicit."
+          "bulk_action": "\"Tick all\" or \"Untick all\" overrides the manual list below on save.",
+          "enabled_devices": "Only ticked devices produce Home Assistant entities."
         }
       }
     },
