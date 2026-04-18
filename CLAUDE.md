@@ -1,4 +1,11 @@
-# CLAUDE.md — instructions for any Claude session working on this fork
+# CLAUDE.md — instructions for any Claude session working on this repo
+
+**Project identity:** `shelly-cloud-diy-ha` — Home Assistant integration for
+Shelly Cloud, using the self-service **Cloud Control API** path (auth_key /
+OAuth). Started as a notDIRK fork of `engesin/shelly-integrator-ha` (which
+uses the gated Integrator API), now diverged into a separate integration
+with domain `shelly_cloud_diy`. Fork lineage kept for git traceability;
+no upstream merges expected.
 
 ## ⚠ HARD RULE — secret scan before every push
 
@@ -22,7 +29,8 @@ If ANY match appears that is not a pattern name in a validator regex or a
 documentation mention of the concept, **stop, tell the user, do not push**.
 
 The operator's live Shelly Cloud `auth_key` lives at
-`~/.config/shelly-integrator-ha/auth_key` (outside any repo, chmod 600).
+`~/.config/shelly-integrator-ha/auth_key` (outside any repo, chmod 600 —
+directory name kept stable across the rename to avoid breaking local scripts).
 Never copy its contents into any file inside this repo, any commit message,
 any `bash -c "echo ..."`, any log line. Read it into a local shell variable
 when needed for a `curl` call and discard.
@@ -35,34 +43,56 @@ approval. Never force-push as a first reflex.
 
 ## Repo topology
 
-- `origin` → `github.com/notDIRK/shelly-integrator-ha` (fork, push target)
-- `upstream` → `github.com/engesin/shelly-integrator-ha` (read-only)
-- Release tags: `vX.Y.Z-notDIRK`; manifest version numeric part stays in sync with the tag.
-- Conventional Commits style (`fix(security): …`, `docs(readme): …`, etc.).
-- `.planning/` is gitignored — GSD scratch, not for the fork.
-- Consolidated codebase map: `docs/CODEBASE_MAP.md`.
+- `origin` → `github.com/notDIRK/shelly-cloud-diy-ha` (push target)
+- `upstream` → `github.com/engesin/shelly-integrator-ha` (read-only; kept for fork-lineage traceability only, no merges expected since we pivoted API)
+- Python domain: `shelly_cloud_diy` (matches repo basename for entity-ID consistency)
+- Release tags: `vX.Y.Z` (SemVer, no personal suffix — targeting HACS default store, the `-notDIRK` suffix would look unprofessional). Historical `vX.Y.Z-notDIRK` tags (≤ v0.2.2) stay on their commits for audit trail.
+- Conventional Commits style (`feat:`, `fix(security):`, `docs:`, etc.).
+- `.planning/` is gitignored — GSD scratch, not for distribution.
+- Pivot roadmap: `docs/ROADMAP.md`. Pre-pivot codebase snapshot: `docs/CODEBASE_MAP.md`.
 
-## Open architectural decision
+## Architectural direction
 
-Pivot from the Integrator API (gated, "no personal use" per Shelly docs) to
-the **Cloud Control API** (self-service `auth_key`, OAuth for realtime) is
-under evaluation. See the bilingual "Getting an API Token" section in the
-README for context. The WebSocket URL is identical between both APIs, so
-a pivot is primarily an auth-layer + config-flow rewrite, not a full
-rewrite. Shared-device access (devices shared from another Shelly account
-into the operator's account) is only achievable on the Cloud Control API
-path.
+The integration has pivoted from the **Shelly Integrator API** (gated by
+Shelly, "Licenses for personal use are not provided") to the
+**Shelly Cloud Control API** (self-service `auth_key` / OAuth). The
+WebSocket endpoint format is identical between both APIs, so the coordinator
+and WebSocket handler are largely reusable; the rewrite centres on the auth
+layer, config flow, and adding support for BLE/gateway-bridged sensors
+(shared devices, Shelly BLU family, etc.) that the Integrator API consent
+model cannot reach.
 
-## Upstream sync flow
+See `docs/ROADMAP.md` for the milestone plan. Milestone 1 (HTTP polling
+with `auth_key`) is the first HACS-release target; Milestone 2 (OAuth +
+WebSocket realtime) is follow-up.
+
+## HA-Core / HACS-Default ambitions
+
+Short term: **HACS default-store submission** (not HA Core). That means a
+logo PR to `home-assistant/brands` when we cut the first stable release,
+and a cleanup pass on anything that would block Core submission later:
+- No `notDIRK` references inside Python source or user-visible strings
+- English log messages
+- Proper exception types (`HomeAssistantError`, `ConfigEntryAuthFailed`, `UpdateFailed`)
+- Translations for every user-visible string
+
+Don't over-engineer for Core (heavy test coverage, diagnostics/repairs
+platforms, quality_scale=gold) — that's future scope.
+
+## Release flow
 
 ```bash
-git fetch upstream
-git merge upstream/main        # resolve conflicts
-# bump manifest.json version
-git commit -am "chore(release): bump manifest version to X.Y.Z"
+# 1. Bump manifest.json version
+git commit -am "chore(release): bump manifest to X.Y.Z"
+
+# 2. Pre-push secret scan (see HARD RULE above)
+
+# 3. Push and tag
 git push origin main
-git tag -a vX.Y.Z-notDIRK -m "Release X.Y.Z-notDIRK"
-git push origin vX.Y.Z-notDIRK
-gh release create vX.Y.Z-notDIRK --repo notDIRK/shelly-integrator-ha \
-  --title "vX.Y.Z-notDIRK" --notes "…"
+git tag -a vX.Y.Z -m "Release X.Y.Z"
+git push origin vX.Y.Z
+
+# 4. GitHub release
+gh release create vX.Y.Z --repo notDIRK/shelly-cloud-diy-ha \
+  --title "vX.Y.Z" --notes "…"
 ```

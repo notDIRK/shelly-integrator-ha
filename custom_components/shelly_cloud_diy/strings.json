@@ -1,0 +1,69 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Shelly Cloud DIY",
+        "description": "Enter your Shelly Cloud DIY API token to connect to Shelly Cloud.",
+        "data": {
+          "integrator_token": "API Token",
+          "local_gateway_url": "Local Gateway URL (optional, for historical data)"
+        }
+      },
+      "consent": {
+        "title": "Grant Device Access",
+        "description": "Click the link below to grant access to your Shelly devices:\n\n**[Open Shelly Cloud Consent Page]({consent_url})**\n\nYou will be asked to log into your Shelly Cloud account and select which devices to share with Home Assistant.\n\nAfter granting access, click **Submit** below to complete setup."
+      },
+      "reconfigure": {
+        "title": "Reconfigure Shelly Cloud DIY",
+        "description": "Update your settings below.\n\n**[Open Shelly Cloud Consent Page]({consent_url})**",
+        "data": {
+          "integrator_token": "API Token",
+          "local_gateway_url": "Local Gateway URL (optional, for historical data)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Shelly Cloud API",
+      "invalid_auth": "Invalid API token",
+      "invalid_gateway_url": "Local gateway URL must be http(s) and not point at localhost",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Shelly Cloud DIY is already configured",
+      "reconfigure_successful": "Configuration updated successfully"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Shelly Cloud DIY Options",
+        "description": "**Add More Devices:**\n[Open Shelly Cloud Consent Page]({consent_url})\n\n**Update Settings:**\nLeave API Token empty to keep current token.",
+        "data": {
+          "integrator_token": "API Token (leave empty to keep current)",
+          "local_gateway_url": "Local Gateway URL (optional, for historical data)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Shelly Cloud API",
+      "invalid_auth": "Invalid API token",
+      "invalid_gateway_url": "Local gateway URL must be http(s) and not point at localhost"
+    }
+  },
+  "services": {
+    "download_and_convert_history": {
+      "name": "Download and Convert History",
+      "description": "Downloads Shelly EM historical data from local gateway and converts to CSV format for import via homeassistant-statistics.",
+      "fields": {
+        "gateway_url": {
+          "name": "Gateway URL",
+          "description": "Base URL of local gateway (overrides configured URL)"
+        },
+        "device_id": {
+          "name": "Device ID",
+          "description": "Optional: Specific device ID to convert (all EM devices if empty)"
+        }
+      }
+    }
+  }
+}
