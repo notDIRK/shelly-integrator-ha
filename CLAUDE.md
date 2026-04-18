@@ -41,6 +41,23 @@ regenerates the auth_key server-side), (3) only then force-remove from
 `origin` with `git push --force-with-lease` and **explicit** operator
 approval. Never force-push as a first reflex.
 
+## Local HA access (private, gitignored)
+
+Der Betreiber betreibt eine laufende Home-Assistant-Instanz, gegen die
+Integrations-Code getestet und debugged werden kann. Zugang dokumentiert in:
+
+```
+./.ha_handoff.md
+```
+
+Diese Datei ist **gitignored** (`.ha_handoff*` in `.gitignore`) und enthaelt
+reale IPs, Hostnamen und Pfade zu Credentials. **Niemals in Commits, Logs,
+Screenshots, Issues oder Chats einfuegen.** Bei versehentlichem Leak:
+Long-Lived-Token in HA rotieren (Profil → Tokens).
+
+Wenn `.ha_handoff.md` fehlt: der Betreiber nutzt dieses Repo gerade
+offline / auf einem anderen Host — einfach ohne Live-HA arbeiten.
+
 ## Repo topology
 
 - `origin` → `github.com/notDIRK/shelly-cloud-diy-ha` (push target)

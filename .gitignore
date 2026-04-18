@@ -79,5 +79,8 @@ Thumbs.db
 *.log
 secrets.yaml
 
+# Private HA handoff (contains real IPs, hostnames, credential paths — NEVER commit)
+.ha_handoff*
+
 # GSD planning scratch space (kept local; consolidated output lives in docs/CODEBASE_MAP.md)
 .planning/
