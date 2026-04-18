@@ -252,6 +252,9 @@ class ShellyCloudDiyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="devices",
             menu_options=["devices_all", "devices_none", "devices_select"],
+            description_placeholders={
+                "total": str(len(self._pending_devices)),
+            },
         )
 
     async def async_step_devices_all(
@@ -457,6 +460,9 @@ class ShellyCloudDiyOptionsFlow(OptionsFlow):
                 "devices_none",
                 "devices_select",
             ],
+            description_placeholders={
+                "total": str(len(self._pending_devices)),
+            },
         )
 
     async def async_step_devices_keep(
