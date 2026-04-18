@@ -57,11 +57,14 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             jwt_token: Initial JWT token
             entry: Config entry (for persistent storage)
         """
+        # Push-only coordinator: state arrives via WebSocket events.
+        # update_interval=None disables the periodic _async_update_data
+        # timer, which was firing every 30s without doing any real work.
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=30),
+            update_interval=None,
         )
 
         self._entry = entry
@@ -520,11 +523,18 @@ class ShellyIntegratorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._device_host_map[device_id] = host
 
         # Merge incoming status into existing status instead of
-        # replacing.  Shallow merge at the top level preserves keys
-        # not present in the partial update.
+        # replacing.  One-level deep merge: a partial update like
+        # {"switch:0": {"output": true}} must not wipe apower/voltage
+        # from the previous full status for that same key.
         existing = self.devices.get(device_id, {})
         existing_status = existing.get("status", {})
-        merged_status = {**existing_status, **new_status}
+        merged_status = dict(existing_status)
+        for key, value in new_status.items():
+            prev = merged_status.get(key)
+            if isinstance(value, dict) and isinstance(prev, dict):
+                merged_status[key] = {**prev, **value}
+            else:
+                merged_status[key] = value
 
         self.devices[device_id] = {
             **existing,
