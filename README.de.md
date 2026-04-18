@@ -7,7 +7,7 @@
 
 > 🇬🇧 **English:** The primary language of this project is English. See [`README.md`](README.md) for the English version.
 
-> 🚧 **Status: aktuell in der Pivot-Phase.** Für die neue Ausrichtung gibt es noch **kein Stable-Release**. Die `v0.2.x`-Tags sind die Legacy-**Integrator-API-Implementierung**, vom engesin-Upstream geerbt; `v0.3.0+` wird das erste Release auf Basis der **Cloud Control API**. Meilensteine: [`docs/ROADMAP.md`](docs/ROADMAP.md) · deutsche Fassung: [`docs/ROADMAP.de.md`](docs/ROADMAP.de.md).
+> ℹ️ **Release-Stand:** `v0.4.x` ist die aktuelle Linie, basierend auf der **Cloud Control API** (self-service `auth_key`). Die `v0.2.x`-Tags sind die Legacy-**Integrator-API-Implementierung** aus dem engesin-Upstream und bleiben nur aus Nachvollziehbarkeit bestehen. Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md) · deutsche Fassung: [`docs/ROADMAP.de.md`](docs/ROADMAP.de.md) — Milestone 2 bringt OAuth + WebSocket-Realtime.
 
 ---
 

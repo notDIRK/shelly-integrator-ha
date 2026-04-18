@@ -7,7 +7,7 @@
 
 > 🇩🇪 **Deutsch:** Eine deutschsprachige Version dieses Dokuments findest du in [`README.de.md`](README.de.md).
 
-> 🚧 **Status: active pivot in progress.** No stable release for this new direction yet. The `v0.2.x` tags are the legacy **Integrator API** implementation inherited from the engesin upstream; `v0.3.0+` will be the first release built on the **Cloud Control API**. Milestones: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+> ℹ️ **Release status:** `v0.4.x` is the current line, built on the **Cloud Control API** (self-service `auth_key`). The `v0.2.x` tags are the legacy **Integrator API** implementation inherited from the engesin upstream and are kept for traceability only. Roadmap: [`docs/ROADMAP.md`](docs/ROADMAP.md) — Milestone 2 adds OAuth + WebSocket realtime.
 
 ---
 
